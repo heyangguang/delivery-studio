@@ -7,6 +7,7 @@ import {
   Modal,
   Radio,
   Select,
+  Steps,
 } from "@arco-design/web-react";
 import {
   IconCheck,
@@ -508,9 +509,9 @@ export function EnrollAgentModal({
 
   const modalWidth = isClusterScoped
     ? effectiveClusterMode === "jumpbox"
-      ? 560
-      : 640
-    : 840;
+      ? 640
+      : 680
+    : 860;
 
   const hasStep2 = enrollments.length > 0;
   const activeSlug = activeEnrollment
@@ -542,24 +543,22 @@ export function EnrollAgentModal({
               <code className="eam-cluster-tag mono">{defaultClusterId}</code>
             )}
           </span>
-          <div className="eam-steps" aria-label={bi("接入步骤", "Steps")}>
-            <span className={`eam-step ${!hasStep2 ? "is-active" : "is-done"}`}>
-              <i>{hasStep2 ? <IconCheck /> : "1"}</i>
-              <span>
-                {isClusterScoped && effectiveClusterMode === "cluster_hosts"
-                  ? bi("确认本集群机器", "Select Nodes")
-                  : bi("登记机器信息", "Register Host")}
-              </span>
-            </span>
-            <span className="eam-step-line" />
-            <span className={`eam-step ${hasStep2 ? "is-active" : ""}`}>
-              <i>2</i>
-              <span>{bi("下载安装并连接", "Install & Connect")}</span>
-            </span>
-          </div>
         </div>
       }
     >
+      <div className="eam-steps-bar">
+        <Steps size="small" current={hasStep2 ? 1 : 0}>
+          <Steps.Step
+            title={
+              isClusterScoped && effectiveClusterMode === "cluster_hosts"
+                ? bi("确认本集群机器", "Select Nodes")
+                : bi("登记机器信息", "Register Host")
+            }
+          />
+          <Steps.Step title={bi("下载安装并连接", "Install & Connect")} />
+        </Steps>
+      </div>
+
       {!hasStep2 ? (
         isClusterScoped && effectiveClusterMode === "cluster_hosts" ? (
           /* ---- CLUSTER-SCOPED NODE CHECKLIST (ONLY THIS CLUSTER'S MACHINES!) ---- */
@@ -644,7 +643,7 @@ export function EnrollAgentModal({
                           ? "is-ok"
                           : existing
                             ? "is-cobalt"
-                            : "is-brand"
+                            : ""
                       }`}
                     >
                       {alreadyBound
@@ -724,12 +723,40 @@ export function EnrollAgentModal({
                   <span className="eam-sec-lbl">
                     {bi("初始关联集群（可选）", "Initial Cluster Associations (Optional)")}
                   </span>
-                  <span className="faint small">
-                    {bi(
-                      "支持空格组合检索，如「pg 172.30 ubuntu」",
-                      "Multi-keyword search, e.g. 'pg 172.30'",
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {sameIPUnboundCount > 0 && (
+                      <Radio.Group
+                        type="button"
+                        size="small"
+                        value={scopeFilter}
+                        onChange={(v) => setScopeFilter(v as "all" | "same_ip")}
+                      >
+                        <Radio value="all">
+                          {bi("全部", "All")} ({allUnbound.length})
+                        </Radio>
+                        <Radio value="same_ip">
+                          {bi("同机 IP", "Same IP")} ({sameIPUnboundCount})
+                        </Radio>
+                      </Radio.Group>
                     )}
-                  </span>
+                    {appOptions.length > 1 && (
+                      <Select
+                        size="small"
+                        style={{ width: 168 }}
+                        value={appFilter}
+                        onChange={setAppFilter}
+                        getPopupContainer={() => document.body}
+                        triggerProps={{ autoFitPosition: true }}
+                        options={[
+                          { value: "all", label: bi("全部中间件", "All Apps") },
+                          ...appOptions.map(([app, n]) => ({
+                            value: app,
+                            label: `${app} (${n})`,
+                          })),
+                        ]}
+                      />
+                    )}
+                  </div>
                 </div>
 
                 <ProTransfer
@@ -746,44 +773,6 @@ export function EnrollAgentModal({
                     "可不选仅接入机器，后续随时在详情页关联",
                     "Optional — you can also associate clusters later",
                   )}
-                  topBar={
-                    sameIPUnboundCount > 0 || appOptions.length > 1 ? (
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        {sameIPUnboundCount > 0 && (
-                          <Radio.Group
-                            type="button"
-                            size="small"
-                            value={scopeFilter}
-                            onChange={(v) => setScopeFilter(v as "all" | "same_ip")}
-                          >
-                            <Radio value="all">
-                              {bi("全部", "All")} ({allUnbound.length})
-                            </Radio>
-                            <Radio value="same_ip">
-                              {bi("同机 IP", "Same IP")} ({sameIPUnboundCount})
-                            </Radio>
-                          </Radio.Group>
-                        )}
-                        {appOptions.length > 1 && (
-                          <Select
-                            size="small"
-                            style={{ width: 168 }}
-                            value={appFilter}
-                            onChange={setAppFilter}
-                            getPopupContainer={() => document.body}
-                            triggerProps={{ autoFitPosition: true }}
-                            options={[
-                              { value: "all", label: bi("全部中间件", "All Apps") },
-                              ...appOptions.map(([app, n]) => ({
-                                value: app,
-                                label: `${app} (${n})`,
-                              })),
-                            ]}
-                          />
-                        )}
-                      </div>
-                    ) : undefined
-                  }
                   onAdd={(keys) =>
                     setSelectedClusters((prev) =>
                       Array.from(new Set([...prev, ...keys])),

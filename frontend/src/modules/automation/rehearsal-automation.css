@@ -1654,25 +1654,31 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 13px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
   background: var(--surface);
   cursor: pointer;
+  outline: none;
+  user-select: none;
   transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 
+.sea-agent-card:focus {
+  outline: none;
+}
+
 .sea-agent-card:hover {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  border-color: var(--ink-2);
+  background: var(--surface-2);
 }
 
 .sea-agent-card.is-selected {
-  border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand-soft) 32%, var(--surface));
-  box-shadow: 0 0 0 1px var(--brand);
+  border-color: var(--kyndryl-line);
+  background: color-mix(in srgb, var(--kyndryl-soft) 36%, var(--surface));
 }
 
 .sea-agent-card.is-muted {
-  opacity: 0.62;
+  opacity: 0.72;
 }
 
 .sea-agent-main,
@@ -1682,6 +1688,11 @@
   gap: 8px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.sea-agent-main > .arco-radio {
+  margin-right: 0;
+  padding-left: 0;
 }
 
 .sea-agent-main > b {
@@ -1702,7 +1713,7 @@
   gap: 6px;
   padding: 5px 10px;
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--surface);
   font-size: 12px;
   cursor: pointer;
@@ -1710,8 +1721,8 @@
 }
 
 .sea-host-chip.on {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
-  background: color-mix(in srgb, var(--brand-soft) 24%, var(--surface));
+  border-color: var(--kyndryl-line);
+  background: color-mix(in srgb, var(--kyndryl-soft) 32%, var(--surface));
 }
 
 .sea-host-chip em {
@@ -2273,13 +2284,19 @@
 
 /* EnrollAgentModal Cluster-Scoped Node Checklist & Step 2 Tabs */
 .eam-cluster-tag {
-  padding: 1px 8px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 5px;
   background: var(--sunken);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   font-size: 12px;
   font-weight: 600;
-  color: var(--brand-ink);
+  color: var(--ink-2);
+}
+
+.eam-steps-bar {
+  padding: 2px 4px 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
 }
 
 .eam-lead-note {
@@ -2300,13 +2317,17 @@
 
 .eam-node-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   user-select: none;
   transition: background-color 0.12s ease;
+}
+
+.eam-node-row > .arco-checkbox {
+  padding-top: 2px;
 }
 
 .eam-node-row:last-child {
@@ -2318,7 +2339,7 @@
 }
 
 .eam-node-row.is-checked {
-  background: color-mix(in srgb, var(--brand-soft) 26%, var(--surface));
+  background: color-mix(in srgb, var(--kyndryl-soft) 32%, var(--surface));
 }
 
 .eam-node-row.is-done {
@@ -2642,10 +2663,9 @@
 .eam-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   padding-right: 28px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .eam-head-title {
@@ -2655,17 +2675,20 @@
   font-size: 16px;
   font-weight: 680;
   color: var(--ink);
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .eam-head-ic {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-size: 15px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--kyndryl-soft);
+  color: var(--kyndryl);
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .eam-steps {

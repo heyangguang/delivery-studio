@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Checkbox, Input, Tooltip } from "@arco-design/web-react";
+import { Button, Checkbox, Input } from "@arco-design/web-react";
 import {
   IconClose,
-  IconDoubleLeft,
-  IconDoubleRight,
   IconEmpty,
   IconLeft,
   IconPlus,
@@ -408,77 +406,26 @@ export function ProTransfer({
             </>
           ) : (
             <>
-              <Tooltip
-                mini
-                content={bi(
-                  `全部移入当前筛选结果 (${enabledLeft.length})`,
-                  `Move all filtered (${enabledLeft.length})`,
-                )}
+              <Button
+                size="small"
+                type="primary"
+                disabled={busy || validLeftIds.length === 0}
+                loading={busy && validLeftIds.length > 0}
+                onClick={() => triggerAdd(validLeftIds)}
+                aria-label={bi("移入右侧", "Move selected")}
               >
-                <Button
-                  size="small"
-                  type="secondary"
-                  disabled={busy || enabledLeft.length === 0}
-                  onClick={() => triggerAdd(enabledLeft.map((x) => x.key))}
-                  aria-label={bi("全部移入", "Move all")}
-                >
-                  <IconDoubleRight />
-                </Button>
-              </Tooltip>
-              <Tooltip
-                mini
-                content={bi(
-                  `移入已勾选 (${validLeftIds.length})`,
-                  `Move selected (${validLeftIds.length})`,
-                )}
+                <IconRight />
+              </Button>
+              <Button
+                size="small"
+                type="secondary"
+                disabled={busy || validRightIds.length === 0}
+                loading={busy && validRightIds.length > 0}
+                onClick={() => triggerRemove(validRightIds)}
+                aria-label={bi("移出已选", "Remove selected")}
               >
-                <Button
-                  size="small"
-                  type="primary"
-                  disabled={busy || validLeftIds.length === 0}
-                  loading={busy && validLeftIds.length > 0}
-                  onClick={() => triggerAdd(validLeftIds)}
-                  aria-label={bi("移入已勾选", "Move selected")}
-                >
-                  <IconRight />
-                </Button>
-              </Tooltip>
-              <Tooltip
-                mini
-                content={bi(
-                  `移出已勾选 (${validRightIds.length})`,
-                  `Remove selected (${validRightIds.length})`,
-                )}
-              >
-                <Button
-                  size="small"
-                  type="secondary"
-                  disabled={busy || validRightIds.length === 0}
-                  loading={busy && validRightIds.length > 0}
-                  onClick={() => triggerRemove(validRightIds)}
-                  aria-label={bi("移出已勾选", "Remove selected")}
-                >
-                  <IconLeft />
-                </Button>
-              </Tooltip>
-              <Tooltip
-                mini
-                content={bi(
-                  `清空右侧 (${enabledRight.length})`,
-                  `Remove all (${enabledRight.length})`,
-                )}
-              >
-                <Button
-                  size="small"
-                  type="secondary"
-                  status="danger"
-                  disabled={busy || enabledRight.length === 0}
-                  onClick={() => triggerRemove(enabledRight.map((x) => x.key))}
-                  aria-label={bi("清空右侧", "Clear all")}
-                >
-                  <IconDoubleLeft />
-                </Button>
-              </Tooltip>
+                <IconLeft />
+              </Button>
             </>
           )}
         </div>

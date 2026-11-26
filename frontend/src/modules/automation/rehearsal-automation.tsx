@@ -517,10 +517,7 @@ export function SelectExecutionAgentModal({
               ) : (
                 <div className="sea-agent-list" role="radiogroup">
                   {selectedIPs.length > 1 && directCoverageCount > 0 && (
-                    <div
-                      role="radio"
-                      aria-checked={selectedAgentId === "__direct__"}
-                      tabIndex={0}
+                    <label
                       className={`sea-agent-card ${selectedAgentId === "__direct__" ? "is-selected" : ""} ${directCoverageCount < selectedIPs.length ? "is-muted" : ""}`}
                       onClick={() => {
                         if (directCoverageCount === selectedIPs.length) {
@@ -529,6 +526,15 @@ export function SelectExecutionAgentModal({
                       }}
                     >
                       <div className="sea-agent-main">
+                        <Radio
+                          checked={selectedAgentId === "__direct__"}
+                          disabled={directCoverageCount < selectedIPs.length}
+                          onChange={() => {
+                            if (directCoverageCount === selectedIPs.length) {
+                              setSelectedAgentId("__direct__");
+                            }
+                          }}
+                        />
                         <span className="iam-ag-dot is-online" />
                         <b>{bi("各目标节点本机 Agent 直连", "Per-Host Local Agents")}</b>
                         <span className="ua-path-badge is-local">
@@ -538,7 +544,7 @@ export function SelectExecutionAgentModal({
                           )}
                         </span>
                       </div>
-                    </div>
+                    </label>
                   )}
 
                   {boundAgents.map((a) => {
@@ -549,15 +555,16 @@ export function SelectExecutionAgentModal({
                       hosts.some((h) => h.ip.trim() === a.ip.trim());
                     const selected = selectedAgentId === a.id;
                     return (
-                      <div
+                      <label
                         key={a.id}
-                        role="radio"
-                        aria-checked={selected}
-                        tabIndex={0}
                         className={`sea-agent-card ${selected ? "is-selected" : ""} ${unusable ? "is-muted" : ""}`}
                         onClick={() => setSelectedAgentId(a.id)}
                       >
                         <div className="sea-agent-main">
+                          <Radio
+                            checked={selected}
+                            onChange={() => setSelectedAgentId(a.id)}
+                          />
                           <span
                             className={`iam-ag-dot ${
                               a.disabled
@@ -588,7 +595,7 @@ export function SelectExecutionAgentModal({
                             <small className="faint">{bi("已禁用", "Disabled")}</small>
                           )}
                         </div>
-                      </div>
+                      </label>
                     );
                   })}
                 </div>

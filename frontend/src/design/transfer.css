@@ -36,7 +36,7 @@
 }
 
 .ptf-pane.is-target {
-  border-color: color-mix(in srgb, var(--brand) 32%, var(--line-strong));
+  border-color: var(--line-strong);
 }
 
 .ptf-head {
@@ -82,7 +82,7 @@
 }
 
 .ptf-invert-btn:hover:not(:disabled) {
-  color: var(--brand-ink);
+  color: var(--ink);
   text-decoration: underline;
 }
 
@@ -100,8 +100,8 @@
 }
 
 .ptf-cnt.is-target {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
+  color: var(--ink-2);
+  background: var(--surface-3);
 }
 
 .ptf-search {
@@ -144,9 +144,9 @@
 .ptf-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   flex-shrink: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 68%, transparent);
   cursor: pointer;
@@ -159,7 +159,7 @@
 }
 
 .ptf-row.is-checked {
-  background: color-mix(in srgb, var(--brand-soft) 30%, var(--surface));
+  background: color-mix(in srgb, var(--kyndryl-soft) 36%, var(--surface));
 }
 
 .ptf-row.is-disabled {
@@ -171,11 +171,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-top: 2px;
 }
 
 .ptf-row-body {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
 }
@@ -202,6 +203,7 @@
 .ptf-dot {
   width: 8px;
   height: 8px;
+  margin-top: 6px;
   border-radius: 999px;
   background: var(--mute);
   flex-shrink: 0;

@@ -241,6 +241,15 @@ func (s *storeServer) secDir() string {
 }
 
 func (s *storeServer) loadSecAdvisories() []secDBAdvisory {
+	if s.repo != nil {
+		if b, ok, err := s.repo.getSecScanSlot("advisories"); err == nil && ok {
+			var out []secDBAdvisory
+			if json.Unmarshal(b, &out) == nil && out != nil {
+				return out
+			}
+		}
+		return []secDBAdvisory{}
+	}
 	if s.cfg.DataDir == "" {
 		return []secDBAdvisory{}
 	}
@@ -259,11 +268,25 @@ func (s *storeServer) saveSecAdvisories(list []secDBAdvisory) error {
 	if list == nil {
 		list = []secDBAdvisory{}
 	}
+	if s.repo != nil {
+		b, err := json.Marshal(list)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveSecScanSlot("advisories", b)
+	}
 	return writeJSONFile(filepath.Join(s.secDir(), "advisories.json"), list)
 }
 
 func (s *storeServer) loadSecMeta() secDBMeta {
 	m := secDBMeta{Ecosystems: []string{}}
+	if s.repo != nil {
+		_, _ = s.repo.loadSettingValue("security_meta", &m)
+		if m.Ecosystems == nil {
+			m.Ecosystems = []string{}
+		}
+		return m
+	}
 	if s.cfg.DataDir == "" {
 		return m
 	}
@@ -280,10 +303,19 @@ func (s *storeServer) saveSecMeta(m secDBMeta) error {
 	if m.Ecosystems == nil {
 		m.Ecosystems = []string{}
 	}
+	if s.repo != nil {
+		return s.repo.saveSettingValue("security_meta", m)
+	}
 	return writeJSONFile(filepath.Join(s.secDir(), "meta.json"), m)
 }
 
 func (s *storeServer) loadSecTriage() map[string]secTriageRecord {
+	if s.repo != nil {
+		if m, err := s.repo.loadSecTriageMap(); err == nil && m != nil {
+			return m
+		}
+		return map[string]secTriageRecord{}
+	}
 	out := map[string]secTriageRecord{}
 	if s.cfg.DataDir == "" {
 		return out
@@ -304,6 +336,9 @@ func (s *storeServer) loadSecTriage() map[string]secTriageRecord {
 }
 
 func (s *storeServer) saveSecTriage(m map[string]secTriageRecord) error {
+	if s.repo != nil {
+		return s.repo.replaceSecTriageMap(m)
+	}
 	list := make([]secTriageRecord, 0, len(m))
 	for _, r := range m {
 		list = append(list, r)
@@ -314,6 +349,13 @@ func (s *storeServer) saveSecTriage(m map[string]secTriageRecord) error {
 
 func (s *storeServer) loadSecPolicy() secPolicy {
 	p := defaultSecPolicy()
+	if s.repo != nil {
+		_, _ = s.repo.loadSettingValue("security_policy", &p)
+		if p.IgnoredPackages == nil {
+			p.IgnoredPackages = []secIgnoreRule{}
+		}
+		return p
+	}
 	if s.cfg.DataDir == "" {
 		return p
 	}
@@ -330,10 +372,24 @@ func (s *storeServer) saveSecPolicy(p secPolicy) error {
 	if p.IgnoredPackages == nil {
 		p.IgnoredPackages = []secIgnoreRule{}
 	}
+	if s.repo != nil {
+		return s.repo.saveSettingValue("security_policy", p)
+	}
 	return writeJSONFile(filepath.Join(s.secDir(), "policy.json"), p)
 }
 
 func (s *storeServer) loadLatestScan() *secScanReport {
+	if s.repo != nil {
+		b, ok, err := s.repo.getSecScanSlot("latest")
+		if err != nil || !ok {
+			return nil
+		}
+		var r secScanReport
+		if json.Unmarshal(b, &r) != nil {
+			return nil
+		}
+		return &r
+	}
 	if s.cfg.DataDir == "" {
 		return nil
 	}
@@ -349,13 +405,32 @@ func (s *storeServer) loadLatestScan() *secScanReport {
 }
 
 func (s *storeServer) saveLatestScan(r *secScanReport) error {
-	if r == nil || s.cfg.DataDir == "" {
+	if r == nil {
+		return nil
+	}
+	if s.repo != nil {
+		b, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveSecScanSlot("latest", b)
+	}
+	if s.cfg.DataDir == "" {
 		return nil
 	}
 	return writeJSONFile(filepath.Join(s.secDir(), "scans", "latest.json"), r)
 }
 
 func (s *storeServer) loadSecHistory() []secScanHistoryEntry {
+	if s.repo != nil {
+		if b, ok, err := s.repo.getSecScanSlot("history"); err == nil && ok {
+			var out []secScanHistoryEntry
+			if json.Unmarshal(b, &out) == nil && out != nil {
+				return out
+			}
+		}
+		return []secScanHistoryEntry{}
+	}
 	if s.cfg.DataDir == "" {
 		return []secScanHistoryEntry{}
 	}
@@ -371,17 +446,35 @@ func (s *storeServer) loadSecHistory() []secScanHistoryEntry {
 }
 
 func (s *storeServer) saveSecHistory(list []secScanHistoryEntry) error {
-	if s.cfg.DataDir == "" {
-		return nil
-	}
 	if len(list) > 30 {
 		list = list[:30]
+	}
+	if s.repo != nil {
+		b, err := json.Marshal(list)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveSecScanSlot("history", b)
+	}
+	if s.cfg.DataDir == "" {
+		return nil
 	}
 	return writeJSONFile(filepath.Join(s.secDir(), "scans", "history.json"), list)
 }
 
 func (s *storeServer) loadSecBaselineWaivers() map[string]secBaselineWaiver {
 	out := map[string]secBaselineWaiver{}
+	var list []secBaselineWaiver
+	if s.repo != nil {
+		if ok, _ := s.repo.loadSettingValue("security_waivers", &list); ok {
+			for _, w := range list {
+				if w.ClusterID != "" && w.CheckID != "" {
+					out[w.ClusterID+"|"+w.CheckID] = w
+				}
+			}
+		}
+		return out
+	}
 	if s.cfg.DataDir == "" {
 		return out
 	}
@@ -389,7 +482,6 @@ func (s *storeServer) loadSecBaselineWaivers() map[string]secBaselineWaiver {
 	if err != nil {
 		return out
 	}
-	var list []secBaselineWaiver
 	if json.Unmarshal(b, &list) == nil {
 		for _, w := range list {
 			if w.ClusterID != "" && w.CheckID != "" {
@@ -401,9 +493,6 @@ func (s *storeServer) loadSecBaselineWaivers() map[string]secBaselineWaiver {
 }
 
 func (s *storeServer) saveSecBaselineWaivers(m map[string]secBaselineWaiver) error {
-	if s.cfg.DataDir == "" {
-		return nil
-	}
 	list := make([]secBaselineWaiver, 0, len(m))
 	for _, w := range m {
 		list = append(list, w)
@@ -414,6 +503,12 @@ func (s *storeServer) saveSecBaselineWaivers(m map[string]secBaselineWaiver) err
 		}
 		return list[i].CheckID < list[j].CheckID
 	})
+	if s.repo != nil {
+		return s.repo.saveSettingValue("security_waivers", list)
+	}
+	if s.cfg.DataDir == "" {
+		return nil
+	}
 	return writeJSONFile(filepath.Join(s.secDir(), "baseline_waivers.json"), list)
 }
 

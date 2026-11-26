@@ -373,7 +373,7 @@ export function AccountsPage({
   };
 
   return (
-    <div className="st-page">
+    <div className="st-page iam-st-page">
       {narrow ? (
         <div className="st-mobile-bar iam-mobile-bar">
           <UnderlineTabs
@@ -893,34 +893,57 @@ function UsersDirectory({
                           </span>
                         )}
                       </span>
-                      <small>{roleName(u.role)}</small>
+                      <small className={u.disabled ? "is-off" : undefined}>
+                        {u.disabled
+                          ? bi("禁止登录与会话访问", "Sign-in blocked")
+                          : (m?.ownedCount || 0) > 0
+                            ? bi(
+                                `名下 ${m!.ownedCount} 个集群`,
+                                `${m!.ownedCount} owned ${m!.ownedCount === 1 ? "cluster" : "clusters"}`,
+                              )
+                            : isMe
+                              ? bi("当前登录会话", "Current session")
+                              : bi("正常启用", "Active")}
+                      </small>
                     </div>
                   </div>
 
                   <div className="iam-u-chips">
-                    {(m?.rids || []).map((rid) => {
-                      const r = roleMap.get(rid);
-                      return (
-                        <span key={`r:${rid}`} className="iam-chip is-role">
-                          {r ? roleTitle(r) : rid}
-                        </span>
-                      );
-                    })}
-                    {(m?.tids || []).map((tid) => (
-                      <span key={`t:${tid}`} className="iam-chip is-team">
-                        {teamMap.get(tid)?.name || tid}
+                    {(m?.rids.length || 0) === 0 && (m?.tids.length || 0) === 0 ? (
+                      <span className="faint small">
+                        {bi("未分配角色", "No roles")}
                       </span>
-                    ))}
+                    ) : (
+                      <>
+                        {(m?.rids || []).map((rid) => {
+                          const r = roleMap.get(rid);
+                          return (
+                            <span key={`r:${rid}`} className="iam-chip is-role">
+                              {r ? roleTitle(r) : rid}
+                            </span>
+                          );
+                        })}
+                        {(m?.tids || []).map((tid) => (
+                          <span key={`t:${tid}`} className="iam-chip is-team">
+                            {teamMap.get(tid)?.name || tid}
+                          </span>
+                        ))}
+                      </>
+                    )}
                   </div>
 
                   <div className="iam-u-scope">
                     {m?.scope === "all" ? (
-                      <span className="iam-scope-badge is-all">
+                      <span
+                        className={`iam-scope-badge ${u.disabled ? "is-muted" : "is-all"}`}
+                      >
                         {bi("全平台全部集群", "All Clusters")}
                       </span>
                     ) : (
                       <>
-                        <span className="iam-scope-badge is-own">
+                        <span
+                          className={`iam-scope-badge ${u.disabled ? "is-muted" : "is-own"}`}
+                        >
                           {m?.scope === "team"
                             ? bi("本人及同团队", "Own & Team")
                             : bi(
@@ -933,7 +956,9 @@ function UsersDirectory({
                               )}
                         </span>
                         {(m?.grantedCount || 0) > 0 && (
-                          <span className="iam-scope-badge is-extra">
+                          <span
+                            className={`iam-scope-badge ${u.disabled ? "is-muted" : "is-extra"}`}
+                          >
                             {bi(
                               `+${m!.grantedCount} 授权集群`,
                               `+${m!.grantedCount} granted`,

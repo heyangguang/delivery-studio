@@ -142,9 +142,11 @@ type storeServer struct {
 	prefMu          sync.Mutex
 	auditMu         sync.Mutex
 	jobPersistMu    sync.Mutex
+	clusterStateMu  sync.Mutex
 	cacheMu         sync.RWMutex
 	planCache       map[string]cachedJobPlan
 	specCache       map[string]cachedJobSpec
+	memClusterState map[string]clusterStateRecord
 	execCache       cachedExecDB
 	users           map[string]storeUser
 	sessions        map[string]storeSession
@@ -154,6 +156,7 @@ type storeServer struct {
 	plat            *platform
 	library         *libraryState
 	jobs            map[string]storeJob
+	stopInspect     chan struct{}
 	sem             chan struct{}
 	wg              trackedWork
 }
@@ -170,7 +173,13 @@ func (s *storeServer) evictJobCaches(id string) {
 
 func storeCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("store serve|supervise|reload --config 配置.json | store user-add --data 数据目录 --username 用户名 --role admin|operator --password-stdin")
+		return errors.New("store serve|supervise|reload|db-export|db-import --config 配置.json | store user-add --data 数据目录 --username 用户名 --role admin|operator --password-stdin")
+	}
+	if args[0] == "db-export" {
+		return storeDBExportCommand(args[1:])
+	}
+	if args[0] == "db-import" {
+		return storeDBImportCommand(args[1:])
 	}
 	f := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)
 	config := f.String("config", "store-config.json", "服务配置")
@@ -272,6 +281,7 @@ func storeCommand(args []string) error {
 			}
 		}
 	}()
+	go s.runAutoInspectLoop(ctx)
 	go func() {
 		defer close(drained)
 		<-ctx.Done()
@@ -415,6 +425,7 @@ func newStoreServer(c storeConfig) (*storeServer, error) {
 		if err != nil {
 			return nil, err
 		}
+		s.migrateLocalFilesToPostgres()
 	}
 	s.mu.Lock()
 	if err := s.loadOrCreateAuthKeyLocked(); err != nil {
@@ -440,7 +451,31 @@ func newStoreServer(c storeConfig) (*storeServer, error) {
 	for id, p := range c.Runtimes {
 		runtimes[id] = p
 	}
-	plat, err := loadPlatform(platformConfig{ComponentsDir: c.ComponentsDir, ArtifactsDir: c.ArtifactsDir, LibraryDir: c.LibraryDir, SourcesFile: c.SourcesFile, Runtimes: runtimes, Docker: c.Docker})
+	pCfg := platformConfig{
+		ComponentsDir: c.ComponentsDir,
+		ArtifactsDir:  c.ArtifactsDir,
+		LibraryDir:    c.LibraryDir,
+		SourcesFile:   c.SourcesFile,
+		Runtimes:      runtimes,
+		Docker:        c.Docker,
+		Repo:          s.repo,
+	}
+	if s.repo != nil {
+		pCfg.LoadSourcesFn = func() ([]byte, error) {
+			var doc struct {
+				YAML string `json:"yaml"`
+			}
+			ok, lerr := s.repo.loadSettingValue("sources_yaml", &doc)
+			if lerr != nil || !ok {
+				return nil, lerr
+			}
+			return []byte(doc.YAML), nil
+		}
+		pCfg.SaveSourcesFn = func(data []byte) error {
+			return s.repo.saveSettingValue("sources_yaml", map[string]string{"yaml": string(data)})
+		}
+	}
+	plat, err := loadPlatform(pCfg)
 	if err != nil {
 		return nil, err
 	}

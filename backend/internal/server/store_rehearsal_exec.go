@@ -223,7 +223,7 @@ func targetAgentOnline(a targetAgent) bool {
 		return false
 	}
 	t, err := time.Parse(time.RFC3339Nano, a.LastSeen)
-	return err == nil && time.Since(t) < 35*time.Second
+	return err == nil && time.Since(t) < agentOnlineTimeout(a.HeartbeatIntervalSec, a.Probe)
 }
 
 func rehearsalTaskActive(state string) bool {
@@ -268,9 +268,19 @@ func defaultClusterAutomationConfig(cluster string) clusterAutomationConfig {
 
 func (s *storeServer) loadClusterAutomationConfig(cluster string) clusterAutomationConfig {
 	cfg := defaultClusterAutomationConfig(cluster)
-	b, err := os.ReadFile(s.clusterAutomationPath(cluster))
-	if err != nil {
-		return cfg
+	var b []byte
+	if s.repo != nil {
+		raw, ok, err := s.repo.getClusterAutomation(cluster)
+		if err != nil || !ok {
+			return cfg
+		}
+		b = raw
+	} else {
+		raw, err := os.ReadFile(s.clusterAutomationPath(cluster))
+		if err != nil {
+			return cfg
+		}
+		b = raw
 	}
 	var saved clusterAutomationConfig
 	if json.Unmarshal(b, &saved) != nil {
@@ -299,16 +309,30 @@ func (s *storeServer) loadClusterAutomationConfig(cluster string) clusterAutomat
 }
 
 func (s *storeServer) saveClusterAutomationConfig(cfg clusterAutomationConfig) error {
+	if s.repo != nil {
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterAutomation(cfg.ClusterID, b)
+	}
 	return atomicExecutionJSON(s.clusterAutomationPath(cfg.ClusterID), cfg)
 }
 
 func (s *storeServer) saveRehearsalExecTask(t rehearsalExecTask) error {
+	if s.repo != nil {
+		return s.repo.saveRehearsalTask(t)
+	}
 	return atomicExecutionJSON(s.rehearsalExecPath(t.ClusterID, t.ID), t)
 }
 
 func (s *storeServer) loadRehearsalExecTask(cluster, taskID string) (rehearsalExecTask, bool) {
 	if !docClusterID.MatchString(cluster) || !executionID.MatchString(taskID) {
 		return rehearsalExecTask{}, false
+	}
+	if s.repo != nil {
+		t, ok, err := s.repo.getRehearsalTask(cluster, taskID)
+		return t, err == nil && ok
 	}
 	b, err := os.ReadFile(s.rehearsalExecPath(cluster, taskID))
 	if err != nil {
@@ -322,6 +346,13 @@ func (s *storeServer) loadRehearsalExecTask(cluster, taskID string) (rehearsalEx
 }
 
 func (s *storeServer) listRehearsalExecTasks(cluster, rehearsalID string, limit int) []rehearsalExecTask {
+	if s.repo != nil {
+		out, err := s.repo.listRehearsalTasks(cluster, rehearsalID, limit)
+		if err != nil || out == nil {
+			return []rehearsalExecTask{}
+		}
+		return out
+	}
 	out := []rehearsalExecTask{}
 	entries, err := os.ReadDir(s.rehearsalExecDir(cluster))
 	if err != nil {
@@ -349,6 +380,13 @@ func (s *storeServer) listRehearsalExecTasks(cluster, rehearsalID string, limit 
 }
 
 func (s *storeServer) listAllActiveRehearsalExecTasks() []rehearsalExecTask {
+	if s.repo != nil {
+		out, err := s.repo.listActiveRehearsalTasks()
+		if err != nil || out == nil {
+			return []rehearsalExecTask{}
+		}
+		return out
+	}
 	out := []rehearsalExecTask{}
 	root := s.executionPath("rehearsal_tasks")
 	cdirs, err := os.ReadDir(root)
@@ -381,6 +419,10 @@ func (s *storeServer) listAllActiveRehearsalExecTasks() []rehearsalExecTask {
 func (s *storeServer) findRehearsalExecTaskByID(taskID string) (rehearsalExecTask, bool) {
 	if !executionID.MatchString(taskID) {
 		return rehearsalExecTask{}, false
+	}
+	if s.repo != nil {
+		t, ok, err := s.repo.getRehearsalTask("", taskID)
+		return t, err == nil && ok
 	}
 	root := s.executionPath("rehearsal_tasks")
 	cdirs, err := os.ReadDir(root)
@@ -675,7 +717,8 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 
 	owners := s.clusterOwners()
 	allPassAccess := func(_, _ string) string { return "operate" }
-	allUnified := listUnifiedAgentsFromDB(d, true, owners, allPassAccess, nil)
+	hbPol := s.loadHeartbeatPolicy()
+	allUnified := applyHeartbeatPolicyToViews(listUnifiedAgentsFromDB(d, true, owners, allPassAccess, nil), hbPol.DefaultIntervalSec)
 	unifiedBound := []unifiedAgentView{}
 	availableAgents := []unifiedAgentView{}
 	onlineUnifiedBound := 0
@@ -757,6 +800,8 @@ func (s *storeServer) buildClusterAutomationSummary(r *http.Request, f clusterFa
 		"last_check_at":    lastCheckAt,
 		"bootstrap":        s.executionBootstrapInfo(r),
 		"recent_tasks":     recent,
+		"live_summary":     s.buildClusterLiveSummary(f.ID, f.Lang, len(hosts)),
+		"heartbeat_policy": hbPol,
 	}
 }
 
@@ -2438,7 +2483,14 @@ func rebuildCombinedTaskOutput(t *rehearsalExecTask) {
 
 func (s *storeServer) applyRehearsalExecEvent(actorKind, actorID string, ev rehearsalExecEvent) (rehearsalExecTask, error) {
 	rehearsalExecMu.Lock()
-	defer rehearsalExecMu.Unlock()
+	locked := true
+	unlock := func() {
+		if locked {
+			locked = false
+			rehearsalExecMu.Unlock()
+		}
+	}
+	defer unlock()
 	t, ok := s.findRehearsalExecTaskByID(ev.TaskID)
 	if !ok {
 		return rehearsalExecTask{}, errors.New("自动化执行任务不存在")
@@ -2574,6 +2626,10 @@ func (s *storeServer) applyRehearsalExecEvent(actorKind, actorID string, ev rehe
 		cfg.LastCheckAt = t.FinishedAt
 		cfg.LastCheckSig = automationChannelSig(t.Transport, t.NodeID, t.NodeExecMethod, t.SSHUser, t.SSHPort)
 		_ = s.saveClusterAutomationConfig(cfg)
+	}
+	unlock()
+	if allDone && t.Kind == "live_inspect" {
+		s.ingestCompletedLiveInspectTask(t)
 	}
 	return t, nil
 }

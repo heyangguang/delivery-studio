@@ -24,10 +24,30 @@ func (s *storeServer) compIgnorePath(name string) string {
 
 func (s *storeServer) loadCompIgnores(name string) []compIgnore {
 	var out []compIgnore
+	if s.repo != nil {
+		if b, ok, err := s.repo.getKV("comp_ignores", name); err == nil && ok {
+			_ = json.Unmarshal(b, &out)
+			return out
+		}
+	}
 	if b, err := os.ReadFile(s.compIgnorePath(name)); err == nil {
 		_ = json.Unmarshal(b, &out)
+		if s.repo != nil {
+			_ = s.repo.putKV("comp_ignores", name, "", b)
+		}
 	}
 	return out
+}
+
+func (s *storeServer) saveCompIgnores(name string, out []compIgnore) error {
+	if s.repo != nil {
+		b, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("comp_ignores", name, "", b)
+	}
+	return writeJSONFile(s.compIgnorePath(name), out)
 }
 
 func (s *storeServer) compIgnored(name string) map[string]bool {

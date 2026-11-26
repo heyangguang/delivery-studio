@@ -22,10 +22,30 @@ func (s *storeServer) userSkills(user string) []aiSkill {
 	if !userNameOK(user) {
 		return out
 	}
+	if s.repo != nil {
+		if b, ok, err := s.repo.getKV("user_ai_skills", user); err == nil && ok {
+			_ = json.Unmarshal(b, &out)
+			return out
+		}
+	}
 	if b, err := os.ReadFile(s.userFile(user, "skills.json")); err == nil {
 		_ = json.Unmarshal(b, &out)
+		if s.repo != nil {
+			_ = s.repo.putKV("user_ai_skills", user, "", b)
+		}
 	}
 	return out
+}
+
+func (s *storeServer) saveUserSkills(user string, skills []aiSkill) error {
+	if s.repo != nil {
+		b, err := json.Marshal(skills)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("user_ai_skills", user, "", b)
+	}
+	return writeJSONFile(s.userFile(user, "skills.json"), skills)
 }
 
 func (s *storeServer) loadUserMCP(user string) []mcpServer {
@@ -33,10 +53,30 @@ func (s *storeServer) loadUserMCP(user string) []mcpServer {
 	if !userNameOK(user) {
 		return out
 	}
+	if s.repo != nil {
+		if b, ok, err := s.repo.getKV("user_ai_mcp", user); err == nil && ok {
+			_ = json.Unmarshal(b, &out)
+			return out
+		}
+	}
 	if b, err := os.ReadFile(s.userFile(user, "mcp.json")); err == nil {
 		_ = json.Unmarshal(b, &out)
+		if s.repo != nil {
+			_ = s.repo.putKV("user_ai_mcp", user, "", b)
+		}
 	}
 	return out
+}
+
+func (s *storeServer) saveUserMCP(user string, all []mcpServer) error {
+	if s.repo != nil {
+		b, err := json.Marshal(all)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("user_ai_mcp", user, "", b)
+	}
+	return writeJSONFile(s.userFile(user, "mcp.json"), all)
 }
 
 // kbTextExt are the files a knowledge base takes: text a person can read.
@@ -144,7 +184,7 @@ func (s *storeServer) handleMe(w http.ResponseWriter, r *http.Request, session s
 			s.fail(w, 400, msg)
 			return
 		}
-		if err := writeJSONFile(s.userFile(me, "skills.json"), in.Skills); err != nil {
+		if err := s.saveUserSkills(me, in.Skills); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -156,7 +196,7 @@ func (s *storeServer) handleMe(w http.ResponseWriter, r *http.Request, session s
 			s.fail(w, 403, "管理员关闭了个人接入外部服务")
 			return
 		}
-		s.mcpAPI(w, r, session, parts, func() []mcpServer { return s.loadUserMCP(me) }, func(all []mcpServer) error { return writeJSONFile(s.userFile(me, "mcp.json"), all) }, true)
+		s.mcpAPI(w, r, session, parts, func() []mcpServer { return s.loadUserMCP(me) }, func(all []mcpServer) error { return s.saveUserMCP(me, all) }, true)
 
 	case parts[0] == "ai-prefs":
 		s.handlePrefs(w, r, me, parts[1:])

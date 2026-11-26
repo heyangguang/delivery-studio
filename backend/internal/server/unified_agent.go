@@ -37,10 +37,12 @@ type unifiedAgentView struct {
 	SupportsExec      bool                   `json:"supports_exec"`
 	ClusterModes      map[string]string      `json:"cluster_modes"`
 	Clusters          []string               `json:"clusters"`
-	SuggestedClusters []string               `json:"suggested_clusters,omitempty"`
-	Probe             *agentHostProbe        `json:"probe,omitempty"`
-	Heartbeats        []agentHeartbeatSample `json:"heartbeats,omitempty"`
-	ServiceName       string                 `json:"service_name,omitempty"`
+	SuggestedClusters     []string               `json:"suggested_clusters,omitempty"`
+	HeartbeatIntervalSec  int                    `json:"heartbeat_interval_sec,omitempty"`
+	EffectiveHeartbeatSec int                    `json:"effective_heartbeat_sec"`
+	Probe                 *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats            []agentHeartbeatSample `json:"heartbeats,omitempty"`
+	ServiceName           string                 `json:"service_name,omitempty"`
 }
 
 func normalizeAgentClusterMode(raw string) (string, bool) {
@@ -250,12 +252,14 @@ func buildUnifiedAgentFromNode(
 		Version:           n.Version,
 		Protocol:          n.Protocol,
 		SupportsExec:      supportsExec,
-		ClusterModes:      modes,
-		Clusters:          sortedMapKeys(modes),
-		SuggestedClusters: suggestedClustersForIP(n.ControllerIP, ipClusters),
-		Probe:             n.Probe,
-		Heartbeats:        n.Heartbeats,
-		ServiceName:       "middleware-execution",
+		ClusterModes:          modes,
+		Clusters:              sortedMapKeys(modes),
+		SuggestedClusters:     suggestedClustersForIP(n.ControllerIP, ipClusters),
+		HeartbeatIntervalSec:  n.HeartbeatIntervalSec,
+		EffectiveHeartbeatSec: effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, 5),
+		Probe:                 n.Probe,
+		Heartbeats:            n.Heartbeats,
+		ServiceName:           "middleware-execution",
 	}
 }
 
@@ -269,23 +273,53 @@ func buildUnifiedAgentFromDirect(
 	modes := filterVisibleAgentModes(effectiveTargetAgentClusterModes(a), canManageGlobal, owners, access)
 	revoked := a.Desired == "revoked"
 	return unifiedAgentView{
-		ID:                a.ID,
-		Backing:           "direct",
-		Name:              a.Host,
-		IP:                a.IP,
-		Online:            targetAgentOnline(a),
-		Disabled:          a.Disabled || revoked,
-		Revoked:           revoked,
-		LastSeen:          a.LastSeen,
-		Version:           a.Version,
-		Protocol:          3,
-		SupportsExec:      !revoked,
-		ClusterModes:      modes,
-		Clusters:          sortedMapKeys(modes),
-		SuggestedClusters: suggestedClustersForIP(a.IP, ipClusters),
-		Probe:             a.Probe,
-		Heartbeats:        a.Heartbeats,
-		ServiceName:       "middleware-target-agent-" + a.ID,
+		ID:                    a.ID,
+		Backing:               "direct",
+		Name:                  a.Host,
+		IP:                    a.IP,
+		Online:                targetAgentOnline(a),
+		Disabled:              a.Disabled || revoked,
+		Revoked:               revoked,
+		LastSeen:              a.LastSeen,
+		Version:               a.Version,
+		Protocol:              3,
+		SupportsExec:          !revoked,
+		ClusterModes:          modes,
+		Clusters:              sortedMapKeys(modes),
+		SuggestedClusters:     suggestedClustersForIP(a.IP, ipClusters),
+		HeartbeatIntervalSec:  a.HeartbeatIntervalSec,
+		EffectiveHeartbeatSec: effectiveAgentHeartbeatSec(a.HeartbeatIntervalSec, 5),
+		Probe:                 a.Probe,
+		Heartbeats:            a.Heartbeats,
+		ServiceName:           "middleware-target-agent-" + a.ID,
+	}
+}
+
+func applyHeartbeatPolicyToViews(views []unifiedAgentView, defaultSec int) []unifiedAgentView {
+	for i := range views {
+		views[i].EffectiveHeartbeatSec = effectiveAgentHeartbeatSec(views[i].HeartbeatIntervalSec, defaultSec)
+	}
+	return views
+}
+
+func (s *storeServer) maybeAutoInspectNewlyBoundClusters(oldModes, newModes map[string]string, agentID, user, lang string) {
+	for cid, mode := range newModes {
+		if mode == "" || oldModes[cid] != "" {
+			continue
+		}
+		rec := s.loadClusterStateRecord(cid)
+		if !rec.ProbePolicy.InspectOnBind {
+			continue
+		}
+		if s.hasActiveMutatingClusterWork(cid) {
+			continue
+		}
+		_, _, _ = s.triggerClusterLiveInspect(cid, triggerLiveInspectOptions{
+			AgentID: agentID,
+			User:    user,
+			Reason:  "bind_auto",
+			Lang:    lang,
+		})
 	}
 }
 
@@ -489,7 +523,14 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 	}
 
 	executionMu.Lock()
-	defer executionMu.Unlock()
+	execLocked := true
+	unlockExec := func() {
+		if execLocked {
+			execLocked = false
+			executionMu.Unlock()
+		}
+	}
+	defer unlockExec()
 	d, err := s.readExecutions()
 	if err != nil {
 		s.fail(w, 500, err.Error())
@@ -504,7 +545,8 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 
 	switch r.Method {
 	case "GET":
-		list := listUnifiedAgentsFromDB(d, canManageGlobal, owners, access, ipClusters)
+		hbPol := s.loadHeartbeatPolicy()
+		list := applyHeartbeatPolicyToViews(listUnifiedAgentsFromDB(d, canManageGlobal, owners, access, ipClusters), hbPol.DefaultIntervalSec)
 		manageable := make([]string, 0, len(owners))
 		for cid := range owners {
 			if actorCanOp(cid) {
@@ -517,6 +559,7 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 			"manageable_clusters": manageable,
 			"cluster_catalog":     catalog,
 			"bootstrap":           s.executionBootstrapInfo(r),
+			"heartbeat_policy":    hbPol,
 		})
 
 	case "POST":
@@ -525,11 +568,12 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 			return
 		}
 		var req struct {
-			Name         string            `json:"name"`
-			IP           string            `json:"ip"`
-			ClusterModes map[string]string `json:"cluster_modes"`
-			Clusters     []string          `json:"clusters"`
-			DefaultMode  string            `json:"default_mode"`
+			Name                 string            `json:"name"`
+			IP                   string            `json:"ip"`
+			ClusterModes         map[string]string `json:"cluster_modes"`
+			Clusters             []string          `json:"clusters"`
+			DefaultMode          string            `json:"default_mode"`
+			HeartbeatIntervalSec int               `json:"heartbeat_interval_sec"`
 		}
 		if decodeBody(w, r, 16384, &req) != nil {
 			s.fail(w, 400, "请求参数无效")
@@ -565,15 +609,16 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 		tDeliver, tProbe, tRehearse := true, true, true
 		token := randomStoreToken(32)
 		n := executionNode{
-			ID:             randomStoreToken(12),
-			Kind:           "independent",
-			Name:           name,
-			ControllerIP:   ipStr,
-			TokenHash:      digest([]byte(token)),
-			Disabled:       false,
-			AllowDelivery:  &tDeliver,
-			AllowProbe:     &tProbe,
-			AllowRehearsal: &tRehearse,
+			ID:                   randomStoreToken(12),
+			Kind:                 "independent",
+			Name:                 name,
+			ControllerIP:         ipStr,
+			TokenHash:            digest([]byte(token)),
+			Disabled:             false,
+			AllowDelivery:        &tDeliver,
+			AllowProbe:           &tProbe,
+			AllowRehearsal:       &tRehearse,
+			HeartbeatIntervalSec: normalizeHeartbeatIntervalSec(req.HeartbeatIntervalSec, true),
 		}
 		applyNodeClusterModes(&n, cleanedModes)
 		d.Nodes[n.ID] = n
@@ -581,33 +626,62 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 			s.fail(w, 500, "保存 Agent 失败")
 			return
 		}
+		hbPol := s.loadHeartbeatPolicy()
+		uv := buildUnifiedAgentFromNode(n, true, owners, access, ipClusters)
+		uv.EffectiveHeartbeatSec = effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, hbPol.DefaultIntervalSec)
 		s.auditReq(r, "unified-agent-create", session.User, fmt.Sprintf("%s %s (%s) clusters=%v", n.ID, n.Name, n.ControllerIP, n.Clusters))
 		s.writeJSON(w, 201, map[string]any{
-			"agent":     buildUnifiedAgentFromNode(n, true, owners, access, ipClusters),
+			"agent":     uv,
 			"token":     token,
 			"bootstrap": s.executionBootstrapInfo(r),
 		})
 
 	case "PATCH":
 		var req struct {
-			ID             string             `json:"id"`
-			Name           *string            `json:"name"`
-			Disabled       *bool              `json:"disabled"`
-			ClusterModes   *map[string]string `json:"cluster_modes"`
-			BindClusters   []string           `json:"bind_clusters"`
-			UnbindClusters []string           `json:"unbind_clusters"`
-			SetCluster     *struct {
+			ID                   string             `json:"id"`
+			Name                 *string            `json:"name"`
+			Disabled             *bool              `json:"disabled"`
+			HeartbeatIntervalSec *int               `json:"heartbeat_interval_sec"`
+			DefaultHeartbeatSec  *int               `json:"default_heartbeat_sec"`
+			ClusterModes         *map[string]string `json:"cluster_modes"`
+			BindClusters         []string           `json:"bind_clusters"`
+			UnbindClusters       []string           `json:"unbind_clusters"`
+			SetCluster           *struct {
 				ClusterID string `json:"cluster_id"`
 				Mode      string `json:"mode"` // "" | "readonly" | "readwrite"
 			} `json:"set_cluster"`
 		}
-		if decodeBody(w, r, 16384, &req) != nil || strings.TrimSpace(req.ID) == "" {
+		if decodeBody(w, r, 16384, &req) != nil {
 			s.fail(w, 400, "请求参数无效")
 			return
 		}
 		id := strings.TrimSpace(req.ID)
-		if (req.Disabled != nil || req.Name != nil) && !canManageGlobal {
-			s.failBi(w, 403, "启用/禁用或重命名 Agent 需要管理权限", "Enabling/disabling or renaming an Agent requires management permission")
+		if req.DefaultHeartbeatSec != nil {
+			if !canManageGlobal {
+				s.failBi(w, 403, "修改全局默认心跳周期需要管理权限", "Updating global heartbeat interval requires management permission")
+				return
+			}
+			pol := agentHeartbeatPolicy{
+				DefaultIntervalSec: normalizeHeartbeatIntervalSec(*req.DefaultHeartbeatSec, false),
+				UpdatedAt:          nowStamp(),
+				UpdatedBy:          session.User,
+			}
+			if err := s.saveHeartbeatPolicy(pol); err != nil {
+				s.fail(w, 500, "保存全局心跳策略失败")
+				return
+			}
+			if id == "" {
+				s.auditReq(r, "agent-heartbeat-policy", session.User, fmt.Sprintf("default_interval_sec=%ds", pol.DefaultIntervalSec))
+				s.writeJSON(w, 200, map[string]any{"heartbeat_policy": pol})
+				return
+			}
+		}
+		if id == "" {
+			s.fail(w, 400, "请求参数无效")
+			return
+		}
+		if (req.Disabled != nil || req.Name != nil || req.HeartbeatIntervalSec != nil) && !canManageGlobal {
+			s.failBi(w, 403, "启用/禁用、重命名或调整 Agent 心跳周期需要管理权限", "Enabling/disabling, renaming, or changing heartbeat interval requires management permission")
 			return
 		}
 
@@ -706,7 +780,11 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 			if req.Disabled != nil {
 				n.Disabled = *req.Disabled
 			}
+			if req.HeartbeatIntervalSec != nil {
+				n.HeartbeatIntervalSec = normalizeHeartbeatIntervalSec(*req.HeartbeatIntervalSec, true)
+			}
 			oldModes := effectiveNodeClusterModes(n)
+			var newCleaned map[string]string
 			if targetModes, hasModeChange := computeTargetModes(oldModes); hasModeChange {
 				cleaned, code, errMsg := validateAgentClusterModeDiff(lang, owners, actorCanOp, oldModes, targetModes)
 				if errMsg != "" {
@@ -714,14 +792,24 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 					return
 				}
 				applyNodeClusterModes(&n, cleaned)
+				newCleaned = cleaned
 			}
 			d.Nodes[id] = n
 			if err := s.saveExecutions(d); err != nil {
 				s.fail(w, 500, "保存 Agent 失败")
 				return
 			}
-			s.auditReq(r, "unified-agent-update", session.User, fmt.Sprintf("%s %s disabled=%v clusters=%v", n.ID, n.Name, n.Disabled, n.ClusterModes))
-			s.writeJSON(w, 200, buildUnifiedAgentFromNode(n, canManageGlobal, owners, access, ipClusters))
+			hbPol := s.loadHeartbeatPolicy()
+			uv := buildUnifiedAgentFromNode(n, canManageGlobal, owners, access, ipClusters)
+			uv.EffectiveHeartbeatSec = effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, hbPol.DefaultIntervalSec)
+			oldCopy := cloneStringMap(oldModes)
+			newCopy := cloneStringMap(newCleaned)
+			unlockExec()
+			if len(newCopy) > 0 && uv.Online && !uv.Disabled {
+				s.maybeAutoInspectNewlyBoundClusters(oldCopy, newCopy, n.ID, session.User, lang)
+			}
+			s.auditReq(r, "unified-agent-update", session.User, fmt.Sprintf("%s %s disabled=%v hb=%ds clusters=%v", n.ID, n.Name, n.Disabled, n.HeartbeatIntervalSec, n.ClusterModes))
+			s.writeJSON(w, 200, uv)
 			return
 		}
 
@@ -737,7 +825,11 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 			if req.Disabled != nil {
 				a.Disabled = *req.Disabled
 			}
+			if req.HeartbeatIntervalSec != nil {
+				a.HeartbeatIntervalSec = normalizeHeartbeatIntervalSec(*req.HeartbeatIntervalSec, true)
+			}
 			oldModes := effectiveTargetAgentClusterModes(a)
+			var newCleaned map[string]string
 			if targetModes, hasModeChange := computeTargetModes(oldModes); hasModeChange {
 				cleaned, code, errMsg := validateAgentClusterModeDiff(lang, owners, actorCanOp, oldModes, targetModes)
 				if errMsg != "" {
@@ -745,14 +837,24 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 					return
 				}
 				applyTargetAgentClusterModes(&a, cleaned)
+				newCleaned = cleaned
 			}
 			d.Agents[id] = a
 			if err := s.saveExecutions(d); err != nil {
 				s.fail(w, 500, "保存 Agent 失败")
 				return
 			}
-			s.auditReq(r, "unified-agent-update", session.User, fmt.Sprintf("%s %s disabled=%v clusters=%v", a.ID, a.Host, a.Disabled, a.ClusterModes))
-			s.writeJSON(w, 200, buildUnifiedAgentFromDirect(a, canManageGlobal, owners, access, ipClusters))
+			hbPol := s.loadHeartbeatPolicy()
+			uv := buildUnifiedAgentFromDirect(a, canManageGlobal, owners, access, ipClusters)
+			uv.EffectiveHeartbeatSec = effectiveAgentHeartbeatSec(a.HeartbeatIntervalSec, hbPol.DefaultIntervalSec)
+			oldCopy := cloneStringMap(oldModes)
+			newCopy := cloneStringMap(newCleaned)
+			unlockExec()
+			if len(newCopy) > 0 && uv.Online && !uv.Disabled {
+				s.maybeAutoInspectNewlyBoundClusters(oldCopy, newCopy, a.ID, session.User, lang)
+			}
+			s.auditReq(r, "unified-agent-update", session.User, fmt.Sprintf("%s %s disabled=%v hb=%ds clusters=%v", a.ID, a.Host, a.Disabled, a.HeartbeatIntervalSec, a.ClusterModes))
+			s.writeJSON(w, 200, uv)
 			return
 		}
 

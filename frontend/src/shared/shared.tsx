@@ -748,6 +748,104 @@ export type Lineage = {
   source_gone?: boolean;
   revision?: boolean;
 };
+export type ClusterProbePolicy = {
+  auto_inspect_enabled: boolean;
+  auto_inspect_interval_sec: number;
+  inspect_on_bind: boolean;
+};
+
+export type ClusterLiveSummary = {
+  data_source: "static_spec" | "applied_baseline" | "manual_probe" | "live_agent" | string;
+  data_source_label: string;
+  has_bound_agent: boolean;
+  has_online_agent: boolean;
+  last_probed_at?: string;
+  probed_hosts?: number;
+  total_hosts?: number;
+  agent_name?: string;
+  active_inspect_task_id?: string;
+  drift_count?: number;
+  role_drift_count?: number;
+  stopped_service_count?: number;
+  probe_policy: ClusterProbePolicy;
+};
+
+export type ClusterParamDrift = {
+  key: string;
+  instance?: string;
+  expected: string;
+  actual: string;
+  expected_from: string;
+  measured_at?: string;
+};
+
+export type ClusterRoleDrift = {
+  host: string;
+  ip?: string;
+  expected_role: string;
+  actual_role: string;
+};
+
+export type ClusterDriftReport = {
+  has_drift: boolean;
+  param_drifts: ClusterParamDrift[];
+  role_drifts: ClusterRoleDrift[];
+  stopped_services?: string[];
+  computed_at: string;
+};
+
+export type ClusterHostLive = {
+  host: string;
+  ip: string;
+  probed_at: string;
+  online: boolean;
+  os_detail?: string;
+  kernel?: string;
+  role?: string;
+  replication_state?: string;
+  services?: { unit: string; active_state: string; sub_state?: string; healthy: boolean }[];
+  listening_ports?: number[];
+  vips?: string[];
+  exact_version?: string;
+  params?: Record<string, string>;
+};
+
+export type ClusterEffectiveView = {
+  cluster_id: string;
+  summary: ClusterLiveSummary;
+  overrides?: {
+    params?: Record<string, string>;
+    entries?: {
+      key: string;
+      before?: string;
+      after: string;
+      source_id?: string;
+      source_title?: string;
+      by?: string;
+      at?: string;
+    }[];
+    updated_at?: string;
+    updated_by?: string;
+  };
+  live?: {
+    source: string;
+    task_id?: string;
+    agent_id?: string;
+    agent_name?: string;
+    collected_at: string;
+    probed_hosts: number;
+    total_hosts: number;
+    exact_version?: string;
+    hosts?: Record<string, ClusterHostLive>;
+    merged_params?: Record<string, string>;
+  } | null;
+  drift?: ClusterDriftReport | null;
+  effective_params: Record<string, unknown>;
+  param_sources: Record<string, string>;
+  effective_roles: Record<string, string>;
+  host_liveness?: Record<string, boolean>;
+};
+
 export type JobFile = { name: string; bytes: number; url: string };
 export type JobDetail = {
   job: Job;
@@ -756,6 +854,7 @@ export type JobDetail = {
   plan?: DeliveryPlan | null;
   lineage?: Lineage | null;
   verification_promote?: JobPromoteTarget[];
+  effective_state?: ClusterEffectiveView | null;
 };
 export type Account = {
   username: string;
@@ -1076,6 +1175,7 @@ export type ClusterView = {
   applied_changes_count?: number;
   last_change_at?: string;
   last_change_title?: string;
+  live_summary?: ClusterLiveSummary;
 };
 
 /* ---------- cluster documents (store_docs.go) ---------- */

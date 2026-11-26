@@ -224,11 +224,12 @@ type clusterView struct {
 	Current  string      `json:"current,omitempty"`
 	Head     string      `json:"head,omitempty"`
 	Holder   string      `json:"holder,omitempty"`
-	Plans               []planEntry `json:"plans"` // newest first
-	Blocked             string      `json:"blocked,omitempty"`
-	AppliedChangesCount int         `json:"applied_changes_count,omitempty"`
-	LastChangeAt        string      `json:"last_change_at,omitempty"`
-	LastChangeTitle     string      `json:"last_change_title,omitempty"`
+	Plans               []planEntry         `json:"plans"` // newest first
+	Blocked             string              `json:"blocked,omitempty"`
+	AppliedChangesCount int                 `json:"applied_changes_count,omitempty"`
+	LastChangeAt        string              `json:"last_change_at,omitempty"`
+	LastChangeTitle     string              `json:"last_change_title,omitempty"`
+	LiveSummary         *clusterLiveSummary `json:"live_summary,omitempty"`
 }
 
 func entryOf(j storeJob) planEntry {
@@ -378,6 +379,11 @@ func (s *storeServer) clusters(w http.ResponseWriter, r *http.Request, session s
 			if v.LastChangeAt > v.Updated {
 				v.Updated = v.LastChangeAt
 			}
+		}
+		ls := s.buildClusterLiveSummary(v.ID, lang, v.Hosts)
+		v.LiveSummary = &ls
+		if ls.LastProbedAt > v.Updated {
+			v.Updated = ls.LastProbedAt
 		}
 	}
 	sort.Slice(views, func(a, b int) bool { return views[a].Updated > views[b].Updated })

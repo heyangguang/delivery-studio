@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -369,9 +368,7 @@ func (st *aiSettings) pruneDeletedRefs() bool {
 
 func (s *storeServer) aiLoad() aiSettings {
 	st := aiSettings{Providers: []aiProvider{}, Features: map[string]aiFeature{}}
-	if b, err := os.ReadFile(s.aiFile("ai.json")); err == nil {
-		_ = json.Unmarshal(b, &st)
-	}
+	_ = s.loadSettingDoc("ai_settings", s.aiFile("ai.json"), &st)
 	if st.Providers == nil {
 		st.Providers = []aiProvider{}
 	}
@@ -391,24 +388,21 @@ func (s *storeServer) aiLoad() aiSettings {
 }
 
 func (s *storeServer) aiSave(st aiSettings) error {
-	return writeJSONFile(s.aiFile("ai.json"), st)
+	return s.saveSettingDoc("ai_settings", s.aiFile("ai.json"), st)
 }
 
 // ---- keys ----
 
 func (s *storeServer) aiKey() ([]byte, error) {
 	path := s.aiFile("ai.key")
-	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
+	if b, ok := s.loadBinaryKeySetting("ai_encryption_key", path, 32); ok {
 		return b, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
 	}
 	k := make([]byte, 32)
 	if _, err := rand.Read(k); err != nil {
 		return nil, err
 	}
-	return k, os.WriteFile(path, k, 0o600)
+	return k, s.saveBinaryKeySetting("ai_encryption_key", path, k)
 }
 
 func (s *storeServer) aiEncrypt(plain string) (string, error) {

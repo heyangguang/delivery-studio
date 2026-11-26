@@ -2900,26 +2900,34 @@ func (s *storeServer) buildRolloutBoard(user, rolloutID, lang string) *rolloutBo
 			}
 		}
 	}
-	// Also scan rehearsals root dir in case an origin cluster directory exists outside current cache.
-	if entries, err := os.ReadDir(filepath.Join(s.cfg.DataDir, "rehearsals")); err == nil {
+	// Also scan persisted rehearsal cluster IDs in case an origin cluster exists outside current cache.
+	extraClusters := []string{}
+	if s.repo != nil {
+		extraClusters, _ = s.repo.listRehearsalClusterIDs()
+	} else if entries, err := os.ReadDir(filepath.Join(s.cfg.DataDir, "rehearsals")); err == nil {
 		for _, e := range entries {
-			if !e.IsDir() || scanned[e.Name()] {
+			if e.IsDir() {
+				extraClusters = append(extraClusters, e.Name())
+			}
+		}
+	}
+	for _, cid := range extraClusters {
+		if scanned[cid] {
+			continue
+		}
+		tf, ok := s.clusterFactsFor(user, cid)
+		if !ok {
+			continue
+		}
+		for _, rh := range s.listRehearsalsLang(cid, lang) {
+			if rh.Source == nil || rh.Source.RolloutID != rolloutID {
 				continue
 			}
-			tf, ok := s.clusterFactsFor(user, e.Name())
-			if !ok {
-				continue
-			}
-			for _, rh := range s.listRehearsalsLang(e.Name(), lang) {
-				if rh.Source == nil || rh.Source.RolloutID != rolloutID {
-					continue
-				}
-				hits = append(hits, found{facts: tf, rh: rh})
-				if rh.Source.IsOrigin {
-					cp := rh
-					originRh = &cp
-					originFacts = tf
-				}
+			hits = append(hits, found{facts: tf, rh: rh})
+			if rh.Source.IsOrigin {
+				cp := rh
+				originRh = &cp
+				originFacts = tf
 			}
 		}
 	}

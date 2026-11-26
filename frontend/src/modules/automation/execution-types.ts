@@ -1,4 +1,11 @@
 import { bi } from "../../app/i18n";
+import type { ClusterLiveSummary } from "../../shared/shared";
+
+export type AgentHeartbeatPolicy = {
+  default_interval_sec: number;
+  updated_at?: string;
+  updated_by?: string;
+};
 
 export type AgentHostProbe = {
   hostname?: string;
@@ -98,6 +105,8 @@ export type UnifiedAgentView = {
   cluster_modes: Record<string, AgentClusterMode>;
   clusters: string[];
   suggested_clusters?: string[];
+  heartbeat_interval_sec?: number;
+  effective_heartbeat_sec?: number;
   probe?: AgentHostProbe;
   heartbeats?: AgentHeartbeatSample[];
   service_name?: string;
@@ -231,6 +240,7 @@ export type RehearsalExecTask = {
   sub_index: number;
   kind:
     | "connectivity_check"
+    | "live_inspect"
     | "baseline_probe"
     | "rehearsal_probe"
     | "rehearsal_step"
@@ -293,6 +303,8 @@ export type ClusterAutomationSummary = {
   last_check_at?: string;
   bootstrap: AutomationBootstrapInfo;
   recent_tasks: RehearsalExecTask[];
+  live_summary?: ClusterLiveSummary;
+  heartbeat_policy?: AgentHeartbeatPolicy;
 };
 
 export const isExecutionNodeOnline = (node: ExecutionNode) =>

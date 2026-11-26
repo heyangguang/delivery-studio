@@ -28,10 +28,7 @@ const (
 // componentSource reports where a component comes from: "builtin", "custom", or "override" (a custom pack that
 // replaces a built-in component of the same name).
 func (s *storeServer) componentSource(name string) string {
-	custom := false
-	if st, err := os.Stat(filepath.Join(s.plat.componentsDir, name, "component.yaml")); err == nil && st.Mode().IsRegular() {
-		custom = true
-	}
+	custom := s.comps().hasLive(name)
 	_, builtin := builtinNames()[name]
 	switch {
 	case custom && builtin:
@@ -149,14 +146,12 @@ func (s *storeServer) listComponents(w http.ResponseWriter) {
 	for _, b := range s.plat.brokenList() {
 		known[b.Name] = true
 	}
-	if entries, err := os.ReadDir(filepath.Join(s.plat.componentsDir, ".work")); err == nil && s.plat.componentsDir != "" {
-		for _, d := range entries {
-			if !d.IsDir() || strings.HasPrefix(d.Name(), ".") || d.Name() == sharedPlatformName || known[d.Name()] || !cs.hasDraft(d.Name()) {
-				continue
-			}
-			e := catalogEntry{Info: mwpack.Info{Name: d.Name(), Title: d.Name(), Category: tr(lang, "草稿", "Draft"), Summary: tr(lang, "尚未发布的新组件", "Unpublished new component"), Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: tr(lang, "尚未发布", "Not published yet")}
-			out = append(out, componentListing{catalogEntry: e, Source: "draft", HasDraft: true})
+	for _, dname := range cs.draftNames() {
+		if dname == sharedPlatformName || known[dname] || !cs.hasDraft(dname) {
+			continue
 		}
+		e := catalogEntry{Info: mwpack.Info{Name: dname, Title: dname, Category: tr(lang, "草稿", "Draft"), Summary: tr(lang, "尚未发布的新组件", "Unpublished new component"), Versions: []mwpack.VerInfo{}, Roles: []mwpack.RoleSpec{}}, Versions: []versionEntry{}, Materials: []catalogMaterial{}, Reason: tr(lang, "尚未发布", "Not published yet")}
+		out = append(out, componentListing{catalogEntry: e, Source: "draft", HasDraft: true})
 	}
 	// Custom components that cannot be loaded stay visible so the administrator can fix or delete them.
 	// Built-in components with a broken override are already in `out` (falling back to built-in) and must not be duplicated.

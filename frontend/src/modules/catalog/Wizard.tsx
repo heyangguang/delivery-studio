@@ -271,48 +271,60 @@ function clean(d: Deployment): Deployment {
 
 /* ---------------------------------------------------------------- sections */
 
-const getSections = (): { id: string; title: string; lead: string }[] => [
-  {
-    id: "basics",
-    title: bi("集群与架构方案", "Cluster & Scheme"),
-    lead: bi(
-      "命名集群，选择系统版本与高可用部署方案",
-      "Name the cluster and select OS, version, and HA deployment scheme",
-    ),
-  },
-  {
-    id: "hosts",
-    title: bi("主机与执行通道", "Hosts & Execution"),
-    lead: bi(
-      "填写目标机器 IPv4、数据盘与控制节点免密执行通道",
-      "Enter target IPv4 addresses, data disks, and passwordless execution path",
-    ),
-  },
-  {
-    id: "placement",
-    title: bi("角色与拓扑放置", "Roles & Topology"),
-    lead: bi(
-      "核对各角色节点分布，平台自动补齐依赖组件",
-      "Review role placement per host; dependencies are added automatically",
-    ),
-  },
-  {
-    id: "params",
-    title: bi("关键参数", "Parameters"),
-    lead: bi(
-      "按需调整核心运行参数，未改动项保持推荐默认值",
-      "Tune core runtime parameters; unchanged settings keep recommended defaults",
-    ),
-  },
-  {
-    id: "access",
-    title: bi("入口与证书", "Access & TLS"),
-    lead: bi(
-      "配置负载均衡、虚拟 IP 与传输加密证书",
-      "Configure load balancing, virtual IPs, and TLS certificates",
-    ),
-  },
-];
+const getSections = (
+  deliveryMode?: string,
+): { id: string; title: string; lead: string }[] => {
+  const isAuto = (deliveryMode || "offline") === "automatic";
+  return [
+    {
+      id: "basics",
+      title: bi("集群与架构方案", "Cluster & Scheme"),
+      lead: bi(
+        "命名集群，选择系统版本与高可用部署方案",
+        "Name the cluster and select OS, version, and HA deployment scheme",
+      ),
+    },
+    {
+      id: "hosts",
+      title: isAuto
+        ? bi("主机与执行通道", "Hosts & Execution")
+        : bi("机器与存储配置", "Hosts & Storage"),
+      lead: isAuto
+        ? bi(
+            "填写目标机器 IPv4、数据盘与自动化执行节点",
+            "Enter target IPv4 addresses, data disks, and automated executor",
+          )
+        : bi(
+            "填写目标机器 IPv4 地址与数据盘挂载设置",
+            "Enter target host IPv4 addresses and data disk settings",
+          ),
+    },
+    {
+      id: "placement",
+      title: bi("角色与拓扑放置", "Roles & Topology"),
+      lead: bi(
+        "核对各角色节点分布，平台自动补齐依赖组件",
+        "Review role placement per host; dependencies are added automatically",
+      ),
+    },
+    {
+      id: "params",
+      title: bi("关键参数", "Parameters"),
+      lead: bi(
+        "按需调整核心运行参数，未改动项保持推荐默认值",
+        "Tune core runtime parameters; unchanged settings keep recommended defaults",
+      ),
+    },
+    {
+      id: "access",
+      title: bi("入口与证书", "Access & TLS"),
+      lead: bi(
+        "配置负载均衡、虚拟 IP 与传输加密证书",
+        "Configure load balancing, virtual IPs, and TLS certificates",
+      ),
+    },
+  ];
+};
 
 const uploadKey = (instance: string, name: string, part: string) =>
   `tls:${instance}:${name}:${part}`;
@@ -621,7 +633,10 @@ function DeliveryForm({
   const [files, setFiles] = useState<Record<string, File | undefined>>({});
   const [res, setRes] = useState<Resolution | null>(null);
   const [resolving, setResolving] = useState(false);
-  const sections = useMemo(() => getSections(), [lang]);
+  const sections = useMemo(
+    () => getSections(dep.delivery_mode),
+    [lang, dep.delivery_mode],
+  );
   const initialSection = sections.some((s) => s.id === resume?.section)
     ? resume!.section!
     : sections[0].id;
@@ -1645,13 +1660,89 @@ function DeliveryForm({
             ),
           )
         : sc.roles;
+    const toggleRoleHost = (
+      role: (typeof allowedRoles)[number],
+      hostName: string,
+    ) => {
+      edit(inst.id, (i) => {
+        const prevMap = { ...(i.placement || {}) };
+        const curList = prevMap[role.name] || [];
+        const isSelected = curList.includes(hostName);
+
+        // Fixed single-host cluster: always keep the sole host bound
+        if (dep.hosts.length === 1 && role.min === 1 && role.max === 1) {
+          return {
+            ...i,
+            placement: { ...prevMap, [role.name]: [hostName] },
+          };
+        }
+
+        // Single-target role (e.g., Primary max === 1): radio switch + smart swap with exclusive sibling roles
+        if (role.max === 1) {
+          if (isSelected) {
+            if ((role.min || 0) >= 1) return i;
+            return { ...i, placement: { ...prevMap, [role.name]: [] } };
+          }
+          const displaced = curList[0];
+          const nextMap: Record<string, string[]> = {
+            ...prevMap,
+            [role.name]: [hostName],
+          };
+          if (role.exclusive) {
+            for (const other of allowedRoles) {
+              if (other.name === role.name || !other.exclusive) continue;
+              const oList = nextMap[other.name] || [];
+              if (oList.includes(hostName)) {
+                const filtered = oList.filter((x) => x !== hostName);
+                nextMap[other.name] =
+                  displaced && !filtered.includes(displaced)
+                    ? [...filtered, displaced]
+                    : filtered;
+              }
+            }
+          }
+          return { ...i, placement: nextMap };
+        }
+
+        // Multi-host role: toggle checkbox; if exclusive, remove from conflicting exclusive sibling roles
+        if (isSelected) {
+          return {
+            ...i,
+            placement: {
+              ...prevMap,
+              [role.name]: curList.filter((x) => x !== hostName),
+            },
+          };
+        }
+        if (role.max && curList.length >= role.max) {
+          return i;
+        }
+        const nextMap: Record<string, string[]> = {
+          ...prevMap,
+          [role.name]: [...curList, hostName],
+        };
+        if (role.exclusive) {
+          for (const other of allowedRoles) {
+            if (other.name === role.name || !other.exclusive) continue;
+            const oList = nextMap[other.name] || [];
+            if (oList.includes(hostName)) {
+              nextMap[other.name] = oList.filter((x) => x !== hostName);
+            }
+          }
+        }
+        return { ...i, placement: nextMap };
+      });
+    };
+
+    const useChipPicker = dep.hosts.length > 0 && dep.hosts.length <= 8;
+
     return (
       <div className="place">
         {contract?.series === "basic" && (
-          <p className="muted small">
+          <p className="muted small" style={{ margin: "0 0 2px" }}>
             {bi(
-              "基础系列只放置一个节点；需要从节点请先切换部署方案。",
-              "Basic tier places only one node; switch deployment scheme to add replicas.",
+              "当前为单节点方案；如需主从高可用，可在第 1 步切换架构方案。",
+              "Single-node scheme selected; switch scheme in Step 1 to add replicas.",
             )}
           </p>
         )}
@@ -1665,6 +1756,20 @@ function DeliveryForm({
               ? bi(`至少 ${r.min} 台`, `Min ${r.min}`)
               : bi("可不放置", "Optional");
           const bad = issueFor(`instances[${inst.id}].placement.${r.name}`);
+          const isLockedSingle =
+            dep.hosts.length === 1 &&
+            r.min === 1 &&
+            r.max === 1 &&
+            cur.length === 1 &&
+            cur[0] === dep.hosts[0].name;
+          const isSingleChoice = r.max === 1;
+          const canSelectAll =
+            useChipPicker &&
+            !isSingleChoice &&
+            !r.exclusive &&
+            dep.hosts.length > 1 &&
+            (!r.max || r.max >= dep.hosts.length);
+
           return (
             <div className={`place-row ${bad ? "is-bad" : ""}`} key={r.name}>
               <div className="place-role">
@@ -1673,39 +1778,116 @@ function DeliveryForm({
                   <span
                     className={`wz-role-cnt num ${bad ? "bad" : cur.length > 0 ? "ok" : ""}`}
                   >
-                    {bi(`已选 ${cur.length} 台`, `${cur.length} selected`)}
+                    {isLockedSingle
+                      ? bi("已自动绑定", "Auto-bound")
+                      : bi(`已选 ${cur.length} 台`, `${cur.length} selected`)}
                   </span>
                 </div>
                 <small>
                   {range}
                   {r.odd ? bi(" · 建议奇数", " · Odd preferred") : ""}
-                  {r.exclusive ? bi(" · 独占机器", " · Exclusive host") : ""}
+                  {r.exclusive && allowedRoles.length > 1
+                    ? bi(" · 角色互斥", " · Exclusive")
+                    : ""}
                 </small>
               </div>
-              <Select
-                mode="multiple"
-                value={cur}
-                triggerProps={{ autoFitPosition: true }}
-                options={dep.hosts.map((h) => ({
-                  value: h.name,
-                  label: `${h.name}${h.ip ? ` (${h.ip})` : ""}`,
-                }))}
-                placeholder={bi("选择机器", "Select hosts")}
-                onChange={(v) =>
-                  edit(inst.id, (i) => ({
-                    ...i,
-                    placement: {
-                      ...(i.placement || {}),
-                      [r.name]: v as string[],
-                    },
-                  }))
-                }
-                aria-label={bi(
-                  `${inst.id} ${r.title || r.name} 放置`,
-                  `${inst.id} ${r.title || r.name} placement`,
-                )}
-                status={bad ? "error" : undefined}
-              />
+
+              {useChipPicker ? (
+                <div
+                  className="wz-place-chips"
+                  role={isSingleChoice ? "radiogroup" : "group"}
+                  aria-label={bi(
+                    `${inst.id} ${r.title || r.name} 放置`,
+                    `${inst.id} ${r.title || r.name} placement`,
+                  )}
+                >
+                  {dep.hosts.map((h) => {
+                    const active = cur.includes(h.name);
+                    const occupiedBy =
+                      !active && r.exclusive && allowedRoles.length > 1
+                        ? allowedRoles.find(
+                            (o) =>
+                              o.name !== r.name &&
+                              o.exclusive &&
+                              (inst.placement?.[o.name] || []).includes(h.name),
+                          )
+                        : undefined;
+                    return (
+                      <button
+                        key={h.name}
+                        type="button"
+                        role={isSingleChoice ? "radio" : "checkbox"}
+                        aria-checked={active}
+                        className={`wz-hchip ${active ? "on" : ""} ${isLockedSingle ? "is-locked" : ""}`}
+                        onClick={() => toggleRoleHost(r, h.name)}
+                      >
+                        <span
+                          className={`wz-hchip-mark ${isSingleChoice ? "is-radio" : ""}`}
+                          aria-hidden
+                        >
+                          {active && <IconCheck />}
+                        </span>
+                        <span className="wz-hchip-name">{h.name}</span>
+                        <span className={`wz-hchip-ip mono ${h.ip ? "" : "is-empty"}`}>
+                          {h.ip || bi("待填 IP", "IP pending")}
+                        </span>
+                        {occupiedBy && (
+                          <span className="wz-hchip-occ">
+                            {occupiedBy.title || occupiedBy.name}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {canSelectAll && (
+                    <button
+                      type="button"
+                      className="wz-hchip-all"
+                      onClick={() =>
+                        edit(inst.id, (i) => ({
+                          ...i,
+                          placement: {
+                            ...(i.placement || {}),
+                            [r.name]:
+                              cur.length === dep.hosts.length
+                                ? []
+                                : dep.hosts.map((h) => h.name),
+                          },
+                        }))
+                      }
+                    >
+                      {cur.length === dep.hosts.length
+                        ? bi("清空", "Clear")
+                        : bi("全选", "All")}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <Select
+                  mode="multiple"
+                  value={cur}
+                  triggerProps={{ autoFitPosition: true }}
+                  options={dep.hosts.map((h) => ({
+                    value: h.name,
+                    label: `${h.name}${h.ip ? ` (${h.ip})` : ""}`,
+                  }))}
+                  placeholder={bi("选择机器", "Select hosts")}
+                  onChange={(v) =>
+                    edit(inst.id, (i) => ({
+                      ...i,
+                      placement: {
+                        ...(i.placement || {}),
+                        [r.name]: v as string[],
+                      },
+                    }))
+                  }
+                  aria-label={bi(
+                    `${inst.id} ${r.title || r.name} 放置`,
+                    `${inst.id} ${r.title || r.name} placement`,
+                  )}
+                  status={bad ? "error" : undefined}
+                />
+              )}
               {bad && <span className="place-bad">{bad}</span>}
             </div>
           );
@@ -2548,7 +2730,14 @@ function DeliveryForm({
                   aria-checked={active}
                   disabled={opt.disabled}
                   className={`wz-mode-card ${active ? "on" : ""}`}
-                  onClick={() => set({ delivery_mode: opt.value })}
+                  onClick={() =>
+                    set({
+                      delivery_mode: opt.value,
+                      ...(opt.value !== "automatic"
+                        ? { execution_host: undefined }
+                        : {}),
+                    })
+                  }
                 >
                   <b>{opt.title}</b>
                   <span>{opt.desc}</span>
@@ -3019,13 +3208,41 @@ function DeliveryForm({
             )}
           </div>
         )}
-        {dep.delivery_mode !== "configuration" && (
+        {(dep.delivery_mode || "offline") === "automatic" ? (
           <ExecutionPlacement
             dep={dep}
             controller={pv?.controller}
             onChange={set}
           />
-        )}
+        ) : dep.delivery_mode !== "configuration" && dep.hosts.length > 1 ? (
+          <div className="wz-offline-ctrl">
+            <div className="wz-offline-ctrl-info">
+              <b>{bi("离线控制节点", "Offline Control Host")}</b>
+              <span>
+                {bi(
+                  "多节点离线部署时，在此机器解压并运行 Ansible 剧本分发到全集群",
+                  "Unpack and run Ansible playbooks from this host during multi-node offline deployment",
+                )}
+              </span>
+            </div>
+            <Select
+              size="small"
+              style={{ width: 220 }}
+              value={dep.controller || undefined}
+              allowClear
+              placeholder={
+                pv?.controller
+                  ? bi(`默认：${pv.controller}`, `Default: ${pv.controller}`)
+                  : bi("自动选择首节点", "Auto first host")
+              }
+              options={dep.hosts.map((h) => ({
+                value: h.name,
+                label: `${h.name}${h.ip ? ` · ${h.ip}` : ""}`,
+              }))}
+              onChange={(v) => set({ controller: v || undefined })}
+            />
+          </div>
+        ) : null}
       </>
     ),
     placement: (

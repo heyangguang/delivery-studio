@@ -5866,6 +5866,7 @@ export function ImportedBaselineModal({
                   </button>
                   <span className="imp-pflow-sep" aria-hidden>›</span>
                   <Tooltip
+                    position="bottom"
                     content={
                       !hasProbe
                         ? bi("请先在第 1 步确认补采项并点击生成探针", "Confirm scope and generate a probe in Step 1 first")
@@ -5874,17 +5875,19 @@ export function ImportedBaselineModal({
                     disabled={hasProbe}
                     mini
                   >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={probeStep === 2}
-                      disabled={!hasProbe}
-                      className={`imp-pflow-step ${probeStep === 2 ? "is-active" : hasProbe && probeStep > 2 ? "is-done" : ""}`}
-                      onClick={() => hasProbe && setProbeStep(2)}
-                    >
-                      <span className="imp-pflow-num">{probeStep > 2 && hasProbe ? <IconCheck /> : "2"}</span>
-                      <span>{bi("获取并执行探针", "Run Probe")}</span>
-                    </button>
+                    <span className="imp-tip-anchor">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={probeStep === 2}
+                        disabled={!hasProbe}
+                        className={`imp-pflow-step ${probeStep === 2 ? "is-active" : hasProbe && probeStep > 2 ? "is-done" : ""}`}
+                        onClick={() => hasProbe && setProbeStep(2)}
+                      >
+                        <span className="imp-pflow-num">{probeStep > 2 && hasProbe ? <IconCheck /> : "2"}</span>
+                        <span>{bi("获取并执行探针", "Run Probe")}</span>
+                      </button>
+                    </span>
                   </Tooltip>
                   <span className="imp-pflow-sep" aria-hidden>›</span>
                   <button
@@ -6053,6 +6056,7 @@ export function ImportedBaselineModal({
                                   </button>
                                 )}
                                 <Tooltip
+                                  position="bottom"
                                   content={
                                     g.dismiss_hint ||
                                     bi(
@@ -6062,15 +6066,17 @@ export function ImportedBaselineModal({
                                   }
                                   mini
                                 >
-                                  <button
-                                    type="button"
-                                    className="imp-gap-act-btn is-dismiss"
-                                    disabled={busyThis || Boolean(gapBusyID)}
-                                    onClick={() => void handleGapDismissAction(g, "dismiss")}
-                                  >
-                                    <IconClose />
-                                    <span>{busyThis ? bi("处理中…", "Saving…") : bi("无需探测", "Dismiss")}</span>
-                                  </button>
+                                  <span className="imp-tip-anchor">
+                                    <button
+                                      type="button"
+                                      className="imp-gap-act-btn is-dismiss"
+                                      disabled={busyThis || Boolean(gapBusyID)}
+                                      onClick={() => void handleGapDismissAction(g, "dismiss")}
+                                    >
+                                      <IconClose />
+                                      <span>{busyThis ? bi("处理中…", "Saving…") : bi("无需探测", "Dismiss")}</span>
+                                    </button>
+                                  </span>
                                 </Tooltip>
                               </div>
                             </div>

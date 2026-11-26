@@ -376,25 +376,90 @@ const EFFECT: Record<string, string> = {
 };
 const DANGER = new Set(["destructive"]);
 
+const normalizeSingleNodeStep = (s: PlanStep, plan: DeliveryPlan): PlanStep => {
+  const inst = s.instance
+    ? (plan.instances || []).find((i) => i.id === s.instance)
+    : undefined;
+  const hostCount = (plan.hosts || []).length;
+  const hasSingleStart = (plan.deploy || []).some((ph) =>
+    (ph.steps || []).some(
+      (st) =>
+        (!s.instance || st.instance === s.instance) &&
+        (st.id === "start-single" ||
+          /启动单节点|Start standalone/i.test(st.title || "")),
+    ),
+  );
+  const isSingleNode =
+    hostCount === 1 ||
+    hasSingleStart ||
+    inst?.params?.deployment_mode === "single";
+  if (!isSingleNode) return s;
+
+  let title = s.title;
+  let desc = s.desc;
+  let expect = s.expect;
+  if (
+    title === "写入数据库与高可用配置" ||
+    title === "Write DB & HA configuration"
+  ) {
+    title = bi("写入数据库配置", "Write database configuration");
+    if (desc?.includes("Patroni")) {
+      desc = bi(
+        "初始化单节点数据库目录，写入 postgresql.conf、pg_hba.conf 与 systemd 覆盖项。",
+        "Initialize single-node database directory and write postgresql.conf, pg_hba.conf, and systemd overrides.",
+      );
+    }
+    if (expect?.includes("Patroni")) {
+      expect = bi(
+        "部署归属标记及单节点 PostgreSQL 配置已写入。",
+        "Deployment scope marker and single-node PostgreSQL configuration written.",
+      );
+    }
+  } else if (
+    title === "写入实例、哨兵与日志切割配置" ||
+    title === "Write Redis, Sentinel & logrotate configs"
+  ) {
+    title = bi("写入实例与日志切割配置", "Write Redis & logrotate configs");
+    if (desc?.includes("sentinel.conf")) {
+      desc = bi(
+        "备份包自带配置后写入单节点 redis.conf、systemd 覆盖项与 logrotate。",
+        "Back up package default config and write standalone redis.conf, systemd overrides, and logrotate.",
+      );
+    }
+    if (expect?.includes("sentinel.conf")) {
+      expect = bi(
+        "单节点 redis.conf 与 systemd/logrotate 配置已写入并校验通过。",
+        "Standalone redis.conf and systemd/logrotate configs written and validated.",
+      );
+    }
+  }
+  if (title === s.title && desc === s.desc && expect === s.expect) return s;
+  return { ...s, title, desc, expect };
+};
+
 const stepOf = (
-  s: PlanStep,
+  raw: PlanStep,
   cd: string,
   key: string,
   files: JobFile[],
-): RStep => ({
-  key,
-  title: (s.instance ? `[${s.instance}] ` : "") + s.title,
-  lead: s.desc,
-  detail: s.expect ? bi(`通过标准：${s.expect}`, `Expected: ${s.expect}`) : undefined,
-  effect: s.effect,
-  hosts: s.hosts.length > 3 ? [s.hosts[0]] : s.hosts,
-  code: cd ? `cd ${cd}\n${s.command}` : s.command,
-  files,
-  rollback:
-    s.effect !== "read-only" && s.rollback
-      ? [{ title: "", text: s.rollback }]
-      : undefined,
-});
+  plan?: DeliveryPlan,
+): RStep => {
+  const s = plan ? normalizeSingleNodeStep(raw, plan) : raw;
+  return {
+    key,
+    title: (s.instance ? `[${s.instance}] ` : "") + s.title,
+    lead: s.desc,
+    detail: s.expect ? bi(`通过标准：${s.expect}`, `Expected: ${s.expect}`) : undefined,
+    effect: s.effect,
+    hosts: s.hosts.length > 3 ? [s.hosts[0]] : s.hosts,
+    code: cd ? `cd ${cd}\n${s.command}` : s.command,
+    files,
+    rollback:
+      s.effect !== "read-only" && s.rollback
+        ? [{ title: "", text: s.rollback }]
+        : undefined,
+  };
+};
 
 const noRollbackMsg = () =>
   bi(
@@ -473,11 +538,14 @@ function buildTabs(
               files: [],
             },
           ]),
-      ...plan.deploy.flatMap((ph): RStep[] => (plan.step_format || 0) >= 2 ? ph.steps.map((s) => stepOf(s, cd, ph.phase + "/" + (s.instance ? "instance-" + s.instance : "platform") + "/" + s.id, [])) : [{
+      ...plan.deploy.flatMap((ph): RStep[] => (plan.step_format || 0) >= 2 ? ph.steps.map((s) => stepOf(s, cd, ph.phase + "/" + (s.instance ? "instance-" + s.instance : "platform") + "/" + s.id, [], plan)) : [{
         key: `deploy-${ph.phase}`,
         title: bi(`阶段：${ph.title}`, `Phase: ${ph.title}`),
         lead: ph.steps
-          .map((s) => `${s.instance ? `[${s.instance}] ` : ""}${s.title}`)
+          .map((raw) => {
+            const s = normalizeSingleNodeStep(raw, plan);
+            return `${s.instance ? `[${s.instance}] ` : ""}${s.title}`;
+          })
           .join(bi("；", "; ")),
         detail: ph.steps.some((s) => s.effect === "disruptive")
           ? bi("包含会短暂中断连接的步骤，应在应用接入前的窗口执行。", "Includes steps that briefly interrupt connections; run prior to application cutover.")

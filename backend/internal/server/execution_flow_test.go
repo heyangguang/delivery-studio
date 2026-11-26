@@ -142,6 +142,12 @@ func TestExecutionAuthorizationAndImmutableSelection(t *testing.T) {
 		t.Fatal("reconciled run remained locked")
 	}
 	bob, bcsrf := storeLogin(t, s, "bob")
+	if w = storeRequest(s, "POST", path, strings.NewReader("{}"), bob, bcsrf); w.Code != 404 {
+		t.Fatal("unowned job execution should be hidden with 404, got", w.Code)
+	}
+	if w = request("PUT", "/api/users/bob/grant", map[string]any{"roles": []string{"auditor"}}); w.Code != 200 {
+		t.Fatal("grant auditor failed", w.Code, w.Body.String())
+	}
 	if w = storeRequest(s, "POST", path, strings.NewReader("{}"), bob, bcsrf); w.Code != 403 {
 		t.Fatal("execution permission bypassed", w.Code)
 	}

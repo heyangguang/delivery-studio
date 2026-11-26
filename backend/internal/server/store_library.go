@@ -38,18 +38,23 @@ type libraryState struct {
 	tasks []*fetchTask // newest last
 	busy  bool         // a fetch or import is changing the library
 	path  string       // where finished tasks are kept, so the history survives a restart
+	repo  *storeRepository
 }
 
 // save keeps the finished tasks. The caller holds the lock.
 func (st *libraryState) save() {
-	if st.path == "" {
-		return
-	}
 	var done []*fetchTask
 	for _, t := range st.tasks {
 		if t.State != "running" {
 			done = append(done, t)
 		}
+	}
+	if st.repo != nil {
+		_ = st.repo.saveSettingValue("library_tasks", done)
+		return
+	}
+	if st.path == "" {
+		return
 	}
 	_ = writeJSON(st.path, done)
 }
@@ -98,8 +103,10 @@ func (s *storeServer) lib() *libraryState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.library == nil {
-		s.library = &libraryState{path: filepath.Join(s.cfg.DataDir, "library-tasks.json")}
-		if b, err := os.ReadFile(s.library.path); err == nil {
+		s.library = &libraryState{path: filepath.Join(s.cfg.DataDir, "library-tasks.json"), repo: s.repo}
+		if s.repo != nil {
+			_, _ = s.repo.loadSettingValue("library_tasks", &s.library.tasks)
+		} else if b, err := os.ReadFile(s.library.path); err == nil {
 			_ = json.Unmarshal(b, &s.library.tasks)
 		}
 	}
@@ -497,10 +504,7 @@ func (s *storeServer) libraryImport(w http.ResponseWriter, r *http.Request, sess
 
 func (s *storeServer) librarySources(w http.ResponseWriter) {
 	src := s.plat.sources.Load()
-	custom := ""
-	if b, err := os.ReadFile(s.plat.cfg.SourcesFile); err == nil {
-		custom = string(b)
-	}
+	custom := src.CustomYAML()
 	list := append([]pkglib.Source(nil), src.List...)
 	sort.SliceStable(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	s.writeJSON(w, 200, map[string]any{"effective": list, "custom": custom, "builtin": pkglib.BuiltinYAML()})

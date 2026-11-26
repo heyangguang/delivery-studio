@@ -457,8 +457,37 @@ export function ClusterDetail({
   }, [c.id, basePlanId]);
   const isImported = c.delivery_mode === "imported";
   const [baselineModal, setBaselineModal] = useState<null | "edit" | "notes" | "probe">(null);
+  const [liveInspecting, setLiveInspecting] = useState(false);
   const [autoSummary, setAutoSummary] = useState<ClusterAutomationSummary | null>(null);
   const deletingImportedRef = useRef(false);
+
+  const runHeaderLiveInspect = async () => {
+    if (liveInspecting) return;
+    setLiveInspecting(true);
+    try {
+      const m = await import("../automation/rehearsal-automation");
+      await m.triggerAndPollClusterLiveInspect(c.id);
+      const targetJobId = c.current || c.holder || c.plans?.[0]?.id;
+      if (targetJobId) {
+        const freshDetail = await api<JobDetail>(
+          `/api/jobs/${encodeURIComponent(targetJobId)}`,
+          { cache: "no-store" },
+        );
+        putDetailCache(targetJobId, freshDetail);
+      }
+      await reload();
+      Message.success(
+        bi(
+          "主机只读实测完成：实时角色、生效参数、证书与软件包已增量更新",
+          "Host read-only telemetry updated non-destructively",
+        ),
+      );
+    } catch (e) {
+      Message.error((e as Error).message || bi("实测采集失败", "Live inspection failed"));
+    } finally {
+      setLiveInspecting(false);
+    }
+  };
   useEffect(() => {
     setBaselineModal(null);
   }, [c.id, resolvedTab]);
@@ -598,6 +627,76 @@ export function ClusterDetail({
               <h1>{c.id}</h1>
               <StatusBadge state={st.dot} label={stLabel} />
               <DeliveryModeTag mode={c.delivery_mode} />
+              {c.live_summary?.data_source === "live_agent" &&
+                c.live_summary.data_source_label && (
+                <Tooltip
+                  mini
+                  content={
+                    c.live_summary.last_probed_at
+                      ? bi(
+                          `Agent 实测数据（最近采集 ${fullTime(c.live_summary.last_probed_at)}）· 点击查看巡检设置`,
+                          `Live Agent telemetry (probed ${fullTime(c.live_summary.last_probed_at)}) · Click for inspection settings`,
+                        )
+                      : bi(
+                          `Agent 实测驱动 · 点击查看自动巡检设置`,
+                          `Live Agent telemetry · Click to configure inspection`,
+                        )
+                  }
+                >
+                  <button
+                    type="button"
+                    className="cl-applied-chip"
+                    onClick={() =>
+                      go(
+                        { name: "deliveries", id: c.id, tab: "automation" },
+                        { replace: true },
+                      )
+                    }
+                  >
+                    <span>
+                      {c.live_summary.data_source_label}
+                      {c.live_summary.last_probed_at
+                        ? ` · ${ago(c.live_summary.last_probed_at)}`
+                        : ""}
+                    </span>
+                  </button>
+                </Tooltip>
+              )}
+              {(c.live_summary?.drift_count || 0) +
+                (c.live_summary?.role_drift_count || 0) >
+                0 && (
+                <Tooltip
+                  mini
+                  content={bi(
+                    "主机实测配置或主从角色与基线存在漂移，点击查看比对明细",
+                    "Live host config or role drifted from baseline; click to inspect",
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="cl-applied-chip"
+                    style={{
+                      background: "var(--warn-soft)",
+                      borderColor: "var(--warn-line)",
+                      color: "var(--warn)",
+                    }}
+                    onClick={() =>
+                      go(
+                        { name: "deliveries", id: c.id, tab: "config" },
+                        { replace: true },
+                      )
+                    }
+                  >
+                    <IconExclamationCircle />
+                    <span>
+                      {bi(
+                        `${(c.live_summary?.drift_count || 0) + (c.live_summary?.role_drift_count || 0)} 项实测漂移`,
+                        `${(c.live_summary?.drift_count || 0) + (c.live_summary?.role_drift_count || 0)} drift(s)`,
+                      )}
+                    </span>
+                  </button>
+                </Tooltip>
+              )}
               {(() => {
                 const appliedList = (rehearsals || []).filter(
                   (x) => x.stage === "finalized" && x.applied && !x.voided,
@@ -705,6 +804,22 @@ export function ClusterDetail({
               label={c.head ? bi("当前运行方案", "Active scheme") : bi("目标部署方案", "Target scheme")}
             />
             <div className="detail-actions">
+              {!readOnly &&
+                can("delivery.execute|execution.manage|security.scan") &&
+                (c.live_summary?.has_online_agent ||
+                  autoSummary?.unified_agents?.some(
+                    (a) => a.online && !a.disabled,
+                  )) && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<IconRefresh />}
+                    loading={liveInspecting}
+                    onClick={() => void runHeaderLiveInspect()}
+                  >
+                    {bi("立即实测采集", "Inspect Now")}
+                  </Button>
+                )}
               <Dropdown
                 trigger="click"
                 position="br"

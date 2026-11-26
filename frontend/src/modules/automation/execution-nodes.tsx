@@ -52,6 +52,7 @@ import { ProTransfer, ProTransferItem } from "../../design/transfer";
 import { bi, useLang, withLang } from "../../app/i18n";
 import {
   AgentClusterCatalogItem,
+  AgentHeartbeatPolicy,
   AgentHeartbeatSample,
   AgentHostProbe,
   AutomationBootstrapInfo,
@@ -70,7 +71,18 @@ type UnifiedAgentsResponse = {
   manageable_clusters?: string[];
   cluster_catalog?: AgentClusterCatalogItem[];
   bootstrap: AutomationBootstrapInfo;
+  heartbeat_policy?: AgentHeartbeatPolicy;
 };
+
+const HEARTBEAT_INTERVAL_OPTIONS = [
+  { value: 3, zh: "3 秒（高频实时）", en: "3s (Fast)" },
+  { value: 5, zh: "5 秒（推荐默认）", en: "5s (Default)" },
+  { value: 10, zh: "10 秒", en: "10s" },
+  { value: 15, zh: "15 秒", en: "15s" },
+  { value: 30, zh: "30 秒", en: "30s" },
+  { value: 60, zh: "60 秒（低开销）", en: "60s (Low overhead)" },
+  { value: 120, zh: "120 秒", en: "120s" },
+];
 
 type UnifiedEnrollment = {
   agent: UnifiedAgentView;
@@ -299,7 +311,10 @@ function HeartbeatPulseBars({
             {agent.disabled
               ? bi("Agent 已停用", "Agent Disabled")
               : agent.online
-                ? bi("心跳正常 · 每 15s 实时上报", "Operational · 15s Heartbeat")
+                ? bi(
+                    `心跳正常 · 每 ${agent.effective_heartbeat_sec || agent.probe?.interval_sec || 5}s 实时上报`,
+                    `Operational · ${agent.effective_heartbeat_sec || agent.probe?.interval_sec || 5}s Heartbeat`,
+                  )
                 : agent.last_seen
                   ? bi("心跳中断 · 当前离线", "Heartbeat Interrupted")
                   : bi("等待首次心跳接入", "Awaiting First Heartbeat")}
@@ -1043,6 +1058,9 @@ export function ExecutionNodes({
   const canManage = can("execution.manage");
 
   const [agents, setAgents] = useState<UnifiedAgentView[]>([]);
+  const [heartbeatPolicy, setHeartbeatPolicy] = useState<AgentHeartbeatPolicy>({
+    default_interval_sec: 5,
+  });
   const [manageableIds, setManageableIds] = useState<string[]>([]);
   const [rawCatalog, setRawCatalog] = useState<AgentClusterCatalogItem[]>([]);
   const [bootInfo, setBootInfo] = useState<AutomationBootstrapInfo | null>(null);
@@ -1092,6 +1110,9 @@ export function ExecutionNodes({
         api<ClusterView[]>("/api/clusters").catch(() => cached<ClusterView[]>("clusters") || []),
       ]);
       setAgents(res.agents || []);
+      if (res.heartbeat_policy) {
+        setHeartbeatPolicy(res.heartbeat_policy);
+      }
       setManageableIds(res.manageable_clusters || []);
       if (res.cluster_catalog) setRawCatalog(res.cluster_catalog);
       setBootInfo(res.bootstrap || null);
@@ -1299,6 +1320,63 @@ export function ExecutionNodes({
     }
   };
 
+  const updateDefaultHeartbeat = async (nextSec: number) => {
+    const k = "hb:global";
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
+    try {
+      const res = await api<{ heartbeat_policy: AgentHeartbeatPolicy }>(
+        "/api/executions/unified-agents",
+        {
+          method: "PATCH",
+          body: JSON.stringify({ default_heartbeat_sec: nextSec }),
+        },
+      );
+      if (res.heartbeat_policy) {
+        setHeartbeatPolicy(res.heartbeat_policy);
+      }
+      await loadAll(true);
+      Message.success(
+        bi(
+          `已将全局默认心跳周期设为 ${nextSec} 秒（下次轮询自动下发生效）`,
+          `Default heartbeat interval set to ${nextSec}s`,
+        ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setKeyBusy(k, false);
+    }
+  };
+
+  const updateAgentHeartbeat = async (agent: UnifiedAgentView, nextSec: number) => {
+    const k = `hb:${agent.id}`;
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
+    try {
+      const updated = await api<UnifiedAgentView>("/api/executions/unified-agents", {
+        method: "PATCH",
+        body: JSON.stringify({ id: agent.id, heartbeat_interval_sec: nextSec }),
+      });
+      setAgents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      Message.success(
+        nextSec > 0
+          ? bi(
+              `已将 Agent「${agent.name}」心跳周期设为 ${nextSec} 秒`,
+              `Set "${agent.name}" heartbeat to ${nextSec}s`,
+            )
+          : bi(
+              `Agent「${agent.name}」已恢复跟随全局默认心跳周期`,
+              `"${agent.name}" now inherits global default heartbeat`,
+            ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setKeyBusy(k, false);
+    }
+  };
+
   const transferBind = async (agent: UnifiedAgentView, cids: string[]) => {
     if (cids.length === 0) return;
     const k = `xfer:${agent.id}`;
@@ -1461,6 +1539,38 @@ export function ExecutionNodes({
                 </button>
               ))}
             </div>
+
+            {canManage && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "6px 10px",
+                  marginTop: 8,
+                  borderRadius: 8,
+                  border: "1px solid var(--line)",
+                  background: "var(--surface-2)",
+                  fontSize: 12,
+                }}
+              >
+                <span className="faint" style={{ whiteSpace: "nowrap" }}>
+                  {bi("默认心跳周期", "Default Heartbeat")}
+                </span>
+                <Select
+                  size="mini"
+                  style={{ width: 132 }}
+                  disabled={Boolean(busyMap["hb:global"])}
+                  value={heartbeatPolicy.default_interval_sec || 5}
+                  onChange={(v) => void updateDefaultHeartbeat(Number(v))}
+                  options={HEARTBEAT_INTERVAL_OPTIONS.map((o) => ({
+                    value: o.value,
+                    label: bi(o.zh, o.en),
+                  }))}
+                />
+              </div>
+            )}
           </div>
 
           <div className="list-body">
@@ -1631,6 +1741,41 @@ export function ExecutionNodes({
                   </div>
 
                   <div className="detail-actions">
+                    {canManage && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 12,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span className="faint">{bi("心跳", "Heartbeat")}</span>
+                        <Select
+                          size="small"
+                          style={{ width: 146 }}
+                          disabled={Boolean(busyMap[`hb:${selected.id}`])}
+                          value={selected.heartbeat_interval_sec || 0}
+                          onChange={(v) =>
+                            void updateAgentHeartbeat(selected, Number(v))
+                          }
+                          options={[
+                            {
+                              value: 0,
+                              label: bi(
+                                `跟随默认 (${heartbeatPolicy.default_interval_sec || 5}s)`,
+                                `Default (${heartbeatPolicy.default_interval_sec || 5}s)`,
+                              ),
+                            },
+                            ...HEARTBEAT_INTERVAL_OPTIONS.map((o) => ({
+                              value: o.value,
+                              label: bi(o.zh, o.en),
+                            })),
+                          ]}
+                        />
+                      </div>
+                    )}
                     {canManage && (
                       <label className="ua-enable-toggle">
                         <span>

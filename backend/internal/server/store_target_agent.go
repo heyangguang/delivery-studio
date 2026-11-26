@@ -225,9 +225,10 @@ type targetAgent struct {
 	Applied        string                 `json:"applied,omitempty"`
 	PublicKey      string                 `json:"public_key,omitempty"`
 	HostKeys       []string               `json:"host_keys,omitempty"`
-	Message        string                 `json:"message,omitempty"`
-	Probe          *agentHostProbe        `json:"probe,omitempty"`
-	Heartbeats     []agentHeartbeatSample `json:"heartbeats,omitempty"`
+	Message              string                 `json:"message,omitempty"`
+	HeartbeatIntervalSec int                    `json:"heartbeat_interval_sec,omitempty"`
+	Probe                *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats           []agentHeartbeatSample `json:"heartbeats,omitempty"`
 }
 
 func targetAgentClusters(a targetAgent) []string {
@@ -613,17 +614,19 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, 500, "回传未保存")
 		return
 	}
+	effHB := effectiveAgentHeartbeatSec(a.HeartbeatIntervalSec, s.loadHeartbeatPolicy().DefaultIntervalSec)
 	if a.Mode != "direct" && n.Disabled && a.Desired == "active" {
-		s.writeJSON(w, 200, map[string]any{"id": a.ID, "desired": "paused"})
+		s.writeJSON(w, 200, map[string]any{"id": a.ID, "desired": "paused", "heartbeat_interval_sec": effHB})
 		return
 	}
 	task, cancelTask := s.pollRehearsalTaskForAgent(a, req.Heartbeat)
 	resp := map[string]any{
-		"id":         a.ID,
-		"mode":       a.Mode,
-		"desired":    a.Desired,
-		"public_key": a.PublicKey,
-		"source_ip":  n.ControllerIP,
+		"id":                     a.ID,
+		"mode":                   a.Mode,
+		"desired":                a.Desired,
+		"public_key":             a.PublicKey,
+		"source_ip":              n.ControllerIP,
+		"heartbeat_interval_sec": effHB,
 	}
 	if task != nil {
 		resp["task"] = task

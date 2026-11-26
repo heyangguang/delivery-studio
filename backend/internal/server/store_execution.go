@@ -55,10 +55,11 @@ type executionNode struct {
 	Disabled       bool                `json:"disabled"`
 	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
 	AllowProbe     *bool               `json:"allow_probe,omitempty"`
-	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
-	ClusterModes   map[string]string      `json:"cluster_modes,omitempty"`
-	Probe          *agentHostProbe        `json:"probe,omitempty"`
-	Heartbeats     []agentHeartbeatSample `json:"heartbeats,omitempty"`
+	AllowRehearsal       *bool                  `json:"allow_rehearsal,omitempty"`
+	ClusterModes         map[string]string      `json:"cluster_modes,omitempty"`
+	HeartbeatIntervalSec int                    `json:"heartbeat_interval_sec,omitempty"`
+	Probe                *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats           []agentHeartbeatSample `json:"heartbeats,omitempty"`
 }
 type executionStep struct {
 	ID        string         `json:"id"`
@@ -289,6 +290,31 @@ func cloneExecutionDB(src executionDB) executionDB {
 }
 
 func (s *storeServer) readExecutions() (executionDB, error) {
+	if s.repo != nil {
+		if s.execCache.valid {
+			return cloneExecutionDB(s.execCache.db), nil
+		}
+		d := executionDB{Nodes: map[string]executionNode{}, Runs: map[string]executionRun{}, Preparations: map[string]executionPreparation{}}
+		b, ok, err := s.repo.getExecStateSlot("main")
+		if err != nil {
+			return executionDB{}, err
+		}
+		if !ok || len(b) == 0 {
+			s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+			return d, nil
+		}
+		if err := json.Unmarshal(b, &d); err != nil {
+			return d, err
+		}
+		if d.Nodes == nil || d.Runs == nil {
+			return d, errors.New("执行状态损坏，已停止接收任务")
+		}
+		if d.Preparations == nil {
+			d.Preparations = map[string]executionPreparation{}
+		}
+		s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+		return d, nil
+	}
 	path := s.executionPath("state.json")
 	st, statErr := os.Stat(path)
 	if os.IsNotExist(statErr) {
@@ -322,6 +348,19 @@ func (s *storeServer) readExecutions() (executionDB, error) {
 	return d, e
 }
 func (s *storeServer) saveExecutions(d executionDB) error {
+	if s.repo != nil {
+		b, err := json.Marshal(d)
+		if err != nil {
+			s.execCache.valid = false
+			return err
+		}
+		if err := s.repo.saveExecStateSlot("main", b); err != nil {
+			s.execCache.valid = false
+			return err
+		}
+		s.execCache = cachedExecDB{valid: true, db: cloneExecutionDB(d)}
+		return nil
+	}
 	path := s.executionPath("state.json")
 	err := atomicExecutionJSON(path, d)
 	if err != nil {
@@ -397,7 +436,7 @@ func (s *storeServer) purgeJobExecutions(jobID string) {
 }
 func executionOnline(n executionNode) bool {
 	t, e := time.Parse(time.RFC3339Nano, n.LastSeen)
-	return e == nil && !n.Disabled && time.Since(t) < 35*time.Second
+	return e == nil && !n.Disabled && time.Since(t) < agentOnlineTimeout(n.HeartbeatIntervalSec, n.Probe)
 }
 func publicExecutionNode(n executionNode) executionNode { n.TokenHash = ""; return n }
 func (s *storeServer) executionRevision(job string) string {
@@ -1554,7 +1593,8 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 					s.fail(w, 500, "执行状态保存失败")
 					return
 				}
-				s.writeJSON(w, 200, map[string]any{"preparation": p})
+				effHB := effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, s.loadHeartbeatPolicy().DefaultIntervalSec)
+				s.writeJSON(w, 200, map[string]any{"preparation": p, "heartbeat_interval_sec": effHB})
 				return
 			}
 		}
@@ -1624,7 +1664,8 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		} else {
 			_, cancelTasks = s.pollRehearsalTaskForNode(n, true)
 		}
-		resp := map[string]any{"work": work}
+		effHB := effectiveAgentHeartbeatSec(n.HeartbeatIntervalSec, s.loadHeartbeatPolicy().DefaultIntervalSec)
+		resp := map[string]any{"work": work, "heartbeat_interval_sec": effHB}
 		if rhTask != nil {
 			resp["rehearsal_task"] = rhTask
 		}

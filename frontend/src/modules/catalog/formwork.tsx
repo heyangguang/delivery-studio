@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -356,25 +357,65 @@ const baselineCatLabel = (cat: string) => {
   }
 };
 
-/** Interactive production-baseline reminder card shown beneath the latest AI form fill. */
+type BaselineSessionPref = {
+  collapsed: boolean;
+  seenIds: string[];
+};
+
+function readBaselinePref(chatId: string): BaselineSessionPref {
+  if (!chatId) return { collapsed: false, seenIds: [] };
+  try {
+    const raw = sessionStorage.getItem(`ds-fw-base-v1:${chatId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        collapsed: Boolean(parsed?.collapsed),
+        seenIds: Array.isArray(parsed?.seenIds) ? parsed.seenIds : [],
+      };
+    }
+  } catch {
+    /* ignore storage issues */
+  }
+  return { collapsed: false, seenIds: [] };
+}
+
+function writeBaselinePref(chatId: string, pref: BaselineSessionPref) {
+  if (!chatId) return;
+  try {
+    sessionStorage.setItem(`ds-fw-base-v1:${chatId}`, JSON.stringify(pref));
+  } catch {
+    /* ignore storage issues */
+  }
+}
+
+/**
+ * Interactive configuration optimization card shown on the latest AI form fill:
+ * - Auto-expands ONLY on the first form-fill turn in a conversation if not yet minimized;
+ * - Once the user clicks "缩小" (Minimize) or continues into subsequent turns, stays folded
+ *   as a quiet, unobtrusive reminder pill that highlights new suggestions on demand.
+ */
 const BaselineCard = React.memo(function BaselineCard({
   items,
-  active,
+  chatId,
+  turnCount,
   busy,
   titles,
   onGo,
   onApply,
 }: {
   items: FormBaseline[];
-  active: boolean;
+  chatId: string;
+  turnCount: number;
   busy: boolean;
   titles: Record<string, string>;
   onGo: (s: string) => void;
   onApply: (prompt: string) => void;
 }) {
   useLang();
-  const [dismissed, setDismissed] = useState(false);
-  const [histOpen, setHistOpen] = useState(false);
+  const [pref, setPref] = useState<BaselineSessionPref>(() =>
+    readBaselinePref(chatId),
+  );
+  const [manualOpen, setManualOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(
     () =>
@@ -385,7 +426,13 @@ const BaselineCard = React.memo(function BaselineCard({
       ),
   );
 
-  // Sync default selections if the item list changes on the same message slot.
+  // Sync session state when chatId changes (e.g., starting a fresh chat).
+  useEffect(() => {
+    setPref(readBaselinePref(chatId));
+    setManualOpen(false);
+    setShowAll(false);
+  }, [chatId]);
+
   const sig = items.map((x) => x.id).join("|");
   useEffect(() => {
     setChecked(
@@ -395,17 +442,64 @@ const BaselineCard = React.memo(function BaselineCard({
           .map((it) => it.id),
       ),
     );
-    setDismissed(false);
     setShowAll(false);
-  }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Once a 2nd+ form-fill turn arrives, automatically fold any previously un-minimized card into the quiet reminder pill.
+    if (turnCount > 1) {
+      setManualOpen(false);
+      setPref((prev) => {
+        if (prev.collapsed) return prev;
+        const next: BaselineSessionPref = {
+          collapsed: true,
+          seenIds: prev.seenIds,
+        };
+        writeBaselinePref(chatId, next);
+        return next;
+      });
+    }
+  }, [sig, turnCount, chatId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isExpanded = manualOpen || (!pref.collapsed && turnCount <= 1);
+
+  // Record currently visible item IDs whenever the card is open so we can badge genuinely new items later.
+  useEffect(() => {
+    if (!isExpanded || !items.length) return;
+    const ids = items.map((it) => it.id);
+    const missing = ids.some((id) => !pref.seenIds.includes(id));
+    if (missing) {
+      const merged = Array.from(new Set([...pref.seenIds, ...ids]));
+      const next = { ...pref, seenIds: merged };
+      setPref(next);
+      writeBaselinePref(chatId, next);
+    }
+  }, [isExpanded, sig, chatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!items.length) return null;
 
+  const minimize = () => {
+    const merged = Array.from(
+      new Set([...pref.seenIds, ...items.map((it) => it.id)]),
+    );
+    const next: BaselineSessionPref = { collapsed: true, seenIds: merged };
+    setPref(next);
+    writeBaselinePref(chatId, next);
+    setManualOpen(false);
+  };
+
+  const reopen = () => {
+    const merged = Array.from(
+      new Set([...pref.seenIds, ...items.map((it) => it.id)]),
+    );
+    const next: BaselineSessionPref = { collapsed: true, seenIds: merged };
+    setPref(next);
+    writeBaselinePref(chatId, next);
+    setManualOpen(true);
+  };
+
   const actionCount = items.filter((it) => it.severity === "action").length;
   const warnCount = items.filter((it) => it.severity === "warn").length;
-  const infoCount = items.length - actionCount - warnCount;
   const actionable = items.filter((it) => !!it.action_prompt);
   const selectedItems = actionable.filter((it) => checked.has(it.id));
+  const newCount = items.filter((it) => !pref.seenIds.includes(it.id)).length;
 
   const toggle = (id: string) => {
     setChecked((prev) => {
@@ -416,8 +510,17 @@ const BaselineCard = React.memo(function BaselineCard({
     });
   };
 
+  const toggleAll = () => {
+    if (selectedItems.length === actionable.length) {
+      setChecked(new Set());
+    } else {
+      setChecked(new Set(actionable.map((it) => it.id)));
+    }
+  };
+
   const applySelected = () => {
     if (!selectedItems.length || busy) return;
+    minimize();
     if (selectedItems.length === 1 && selectedItems[0].action_prompt) {
       onApply(selectedItems[0].action_prompt);
       return;
@@ -426,112 +529,81 @@ const BaselineCard = React.memo(function BaselineCard({
       (it, idx) => `${idx + 1}. ${it.title}：${it.action_prompt}`,
     );
     onApply(
-      `请按「生产基线检查」卡片的以下 ${selectedItems.length} 项建议一次性补齐表单配置（其余已有配置保持不变）：\n` +
+      `请按配置优化建议一次性补齐以下 ${selectedItems.length} 项表单配置（其余已有配置保持不变）：\n` +
         lines.join("\n"),
     );
   };
 
-  // Historical turns or dismissed active cards collapse into a quiet single-line bar.
-  if (!active && !histOpen) {
+  if (!isExpanded) {
     return (
-      <div className="fw-base-mini">
-        <IconSafe />
-        <span>
-          {bi(
-            `生产基线巡检 · 该轮检出 ${items.length} 项提醒`,
-            `Baseline check · ${items.length} reminder${items.length === 1 ? "" : "s"} in this turn`,
-          )}
-        </span>
+      <div className="fw-base-remind-wrap">
         <button
           type="button"
-          className="link quiet"
-          onClick={() => setHistOpen(true)}
+          className={`fw-base-remind ${newCount > 0 ? "has-new" : ""}`}
+          onClick={reopen}
         >
-          {bi("查看", "View")}
-        </button>
-      </div>
-    );
-  }
-  if (active && dismissed) {
-    return (
-      <div className="fw-base-mini">
-        <IconSafe />
-        <span>
-          {bi(
-            `已暂不调整基线建议（${items.length} 项已折叠）`,
-            `Baseline suggestions dismissed (${items.length} hidden)`,
+          <span
+            className={`fw-base-remind-dot ${actionCount > 0 ? "is-action" : warnCount > 0 ? "is-warn" : ""}`}
+            aria-hidden
+          />
+          <span className="fw-base-remind-txt">
+            {bi(
+              `有 ${items.length} 项配置优化建议`,
+              `${items.length} configuration suggestion${items.length === 1 ? "" : "s"}`,
+            )}
+          </span>
+          {newCount > 0 && (
+            <span className="fw-base-remind-new">
+              {bi(`+${newCount} 新增`, `+${newCount} new`)}
+            </span>
           )}
-        </span>
-        <button
-          type="button"
-          className="link quiet"
-          onClick={() => setDismissed(false)}
-        >
-          {bi("重新展开", "Reopen")}
+          <span className="fw-base-remind-cta">
+            {bi("查看建议", "Review")}
+            <IconDown />
+          </span>
         </button>
       </div>
     );
   }
 
-  const visible =
-    showAll || items.length <= 4 ? items : items.slice(0, 4);
+  const visible = showAll || items.length <= 4 ? items : items.slice(0, 4);
   const hiddenCount = items.length - visible.length;
-  const topSev =
-    actionCount > 0 ? "action" : warnCount > 0 ? "warn" : "info";
 
   return (
     <section
-      className={`fw-base is-${topSev} ${active ? "" : "is-hist"}`}
-      aria-label={bi("生产基线检查", "Production baseline check")}
+      className="fw-base"
+      aria-label={bi("配置优化建议", "Configuration suggestions")}
     >
       <header className="fw-base-h">
-        <span className={`fw-base-icon is-${topSev}`} aria-hidden>
-          <IconSafe />
-        </span>
         <div className="fw-base-title">
-          <b>{bi("生产基线检查", "Production Baseline Check")}</b>
-          <span className="fw-base-pills">
-            {actionCount > 0 && (
-              <span className="fw-base-pill is-action">
-                {bi(`${actionCount} 项需补齐`, `${actionCount} required`)}
-              </span>
-            )}
-            {warnCount > 0 && (
-              <span className="fw-base-pill is-warn">
-                {bi(`${warnCount} 项建议关注`, `${warnCount} recommended`)}
-              </span>
-            )}
-            {infoCount > 0 && actionCount === 0 && warnCount === 0 && (
-              <span className="fw-base-pill is-info">
-                {bi(`${infoCount} 项可选加固`, `${infoCount} optional`)}
-              </span>
-            )}
+          <span className="fw-base-spark" aria-hidden>
+            <Spark size={13} rainbow />
           </span>
+          <b>{bi("配置优化建议", "Configuration Suggestions")}</b>
+          <span className="fw-base-count">{items.length}</span>
+          {actionCount > 0 && (
+            <span className="fw-base-sub">
+              {bi(`含 ${actionCount} 项重点`, `${actionCount} key`)}
+            </span>
+          )}
         </div>
-        {!active ? (
-          <button
-            type="button"
-            className="fw-base-fold"
-            onClick={() => setHistOpen(false)}
-          >
-            {bi("收起", "Collapse")}
-            <IconUp />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="fw-base-fold"
-            onClick={() => setDismissed(true)}
-            title={bi("暂不调整，折叠此提醒", "Dismiss and collapse")}
-          >
-            {bi("暂不调整", "Skip for now")}
-          </button>
-        )}
+        <button
+          type="button"
+          className="fw-base-fold"
+          onClick={minimize}
+          title={bi(
+            "缩小为单行提醒，后续仅在有需要时点击查看",
+            "Minimize to a compact reminder pill",
+          )}
+        >
+          {bi("缩小", "Minimize")}
+          <IconUp />
+        </button>
       </header>
 
       <ul className="fw-base-list">
         {visible.map((it) => {
-          const canCheck = active && !!it.action_prompt;
+          const canCheck = !!it.action_prompt;
           const isChecked = canCheck && checked.has(it.id);
           const title = bi(it.title, it.title_en || it.title);
           const detail = bi(it.detail, it.detail_en || it.detail);
@@ -541,14 +613,14 @@ const BaselineCard = React.memo(function BaselineCard({
             it.recommended_en || it.recommended || "",
           );
           const actLabel = bi(
-            it.action_label || "一键补齐",
+            it.action_label || "采纳",
             it.action_label_en || "Apply",
           );
           const secTitle = it.section ? titles[it.section] || it.section : "";
           return (
             <li
               key={it.id}
-              className={`fw-base-item is-${it.severity || "info"} ${isChecked ? "is-checked" : ""}`}
+              className={`fw-base-item ${isChecked ? "is-checked" : ""}`}
             >
               <div className="fw-base-lead">
                 {canCheck ? (
@@ -571,12 +643,15 @@ const BaselineCard = React.memo(function BaselineCard({
                 )}
               </div>
 
-              <div className="fw-base-body">
+              <div
+                className="fw-base-body"
+                onClick={canCheck && !busy ? () => toggle(it.id) : undefined}
+              >
                 <div className="fw-base-top">
-                  <span className={`fw-base-cat is-${it.category || "resource"}`}>
+                  <span className="fw-base-name">{title}</span>
+                  <span className="fw-base-cat">
                     {baselineCatLabel(it.category)}
                   </span>
-                  <span className="fw-base-name">{title}</span>
                   {(cur || rec) && (
                     <span className="fw-base-diff">
                       {cur && <span className="fw-base-cur">{cur}</span>}
@@ -601,15 +676,17 @@ const BaselineCard = React.memo(function BaselineCard({
                     title={bi(`打开「${secTitle}」步骤查看`, `Open "${secTitle}" step`)}
                   >
                     {bi("定位", "Locate")}
-                    <IconRight />
                   </button>
                 )}
-                {active && it.action_prompt && (
+                {it.action_prompt && (
                   <button
                     type="button"
                     className="fw-base-one"
                     disabled={busy}
-                    onClick={() => onApply(it.action_prompt!)}
+                    onClick={() => {
+                      minimize();
+                      onApply(it.action_prompt!);
+                    }}
                   >
                     {actLabel}
                   </button>
@@ -628,8 +705,8 @@ const BaselineCard = React.memo(function BaselineCard({
         >
           <IconDown />
           {bi(
-            `展开其余 ${hiddenCount} 项基线建议`,
-            `Show ${hiddenCount} more baseline reminder${hiddenCount === 1 ? "" : "s"}`,
+            `展开其余 ${hiddenCount} 项建议`,
+            `Show ${hiddenCount} more`,
           )}
         </button>
       )}
@@ -640,32 +717,42 @@ const BaselineCard = React.memo(function BaselineCard({
           onClick={() => setShowAll(false)}
         >
           <IconUp />
-          {bi("收起部分基线项", "Show fewer")}
+          {bi("收起部分项", "Show fewer")}
         </button>
       )}
 
-      {active && actionable.length > 0 && (
+      {actionable.length > 0 && (
         <footer className="fw-base-foot">
-          <span className="fw-base-hint">
-            {bi(
-              "勾选需要 AI 补齐的基线项，或点击单项按钮直接处理；也可以点「定位」手动微调",
-              "Check items for AI to apply together, click a single item, or locate it in the form",
-            )}
-          </span>
+          <button
+            type="button"
+            className="fw-base-selall"
+            disabled={busy}
+            onClick={toggleAll}
+          >
+            {selectedItems.length === actionable.length
+              ? bi("取消全选", "Deselect all")
+              : bi(`全选 (${actionable.length})`, `Select all (${actionable.length})`)}
+          </button>
           <div className="fw-base-foot-btns">
+            <button
+              type="button"
+              className="fw-base-skip"
+              onClick={minimize}
+            >
+              {bi("暂不调整", "Not now")}
+            </button>
             <button
               type="button"
               className="fw-base-apply"
               disabled={busy || selectedItems.length === 0}
               onClick={applySelected}
             >
-              <Spark size={12} rainbow />
               {selectedItems.length > 0
                 ? bi(
-                    `让 AI 补齐已选 (${selectedItems.length})`,
+                    `一键采纳 (${selectedItems.length})`,
                     `Apply selected (${selectedItems.length})`,
                   )
-                : bi("请先勾选基线项", "Select items to apply")}
+                : bi("请选择建议项", "Select items")}
             </button>
           </div>
         </footer>
@@ -706,6 +793,10 @@ export function FormWorkspace({
     for (let i = fa.msgs.length - 1; i >= 0; i--) if (fa.msgs[i].form) return i;
     return -1;
   })();
+  const formTurnCount = useMemo(
+    () => fa.msgs.reduce((n, m) => (m.form ? n + 1 : n), 0),
+    [fa.msgs],
+  );
   // follow the conversation as it grows via coalesced rAF, unless the person scrolled up to read something
   useEffect(() => {
     if (!stickRef.current) return;
@@ -814,10 +905,11 @@ export function FormWorkspace({
                 {m.form && !(isLatestForm && fa.run?.active) && (
                   <>
                     <Filled m={m} titles={titles} onGo={onGo} />
-                    {baselines.length > 0 && (
+                    {isLatestForm && baselines.length > 0 && (
                       <BaselineCard
                         items={baselines}
-                        active={isLatestForm && !fa.run?.active}
+                        chatId={fa.chatId}
+                        turnCount={formTurnCount}
                         busy={fa.busy}
                         titles={titles}
                         onGo={onGo}

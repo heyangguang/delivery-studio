@@ -10,6 +10,7 @@ import {
   Radio,
   Select,
   Skeleton,
+  Switch,
 } from "@arco-design/web-react";
 import {
   IconCheckCircle,
@@ -31,7 +32,8 @@ import {
   IconUp,
 } from "@arco-design/web-react/icon";
 import { go } from "../../app/router";
-import { api, can, copy, err } from "../../shared/shared";
+import { ago, api, can, copy, err } from "../../shared/shared";
+import type { ClusterEffectiveView, ClusterLiveSummary, ClusterProbePolicy } from "../../shared/shared";
 import { bi, useLang } from "../../app/i18n";
 import {
   ClusterAutomationHost,
@@ -784,6 +786,34 @@ function InPlaceEnrollButton({
   );
 }
 
+const AUTO_INSPECT_INTERVALS = [
+  { value: 300, zh: "每 5 分钟", en: "Every 5m" },
+  { value: 900, zh: "每 15 分钟", en: "Every 15m" },
+  { value: 1800, zh: "每 30 分钟（推荐）", en: "Every 30m (Default)" },
+  { value: 3600, zh: "每 1 小时", en: "Every 1h" },
+  { value: 21600, zh: "每 6 小时", en: "Every 6h" },
+  { value: 86400, zh: "每 24 小时", en: "Every 24h" },
+];
+
+export async function triggerAndPollClusterLiveInspect(
+  clusterId: string,
+  onTaskUpdate?: (t: RehearsalExecTask) => void,
+): Promise<ClusterEffectiveView | null> {
+  const res = await api<{ task: RehearsalExecTask; effective: ClusterEffectiveView }>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/live-state/inspect`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  if (res.task) {
+    onTaskUpdate?.(res.task);
+    await pollRehearsalExecTask(clusterId, res.task.id, (t) => onTaskUpdate?.(t));
+  }
+  const latest = await api<{ effective: ClusterEffectiveView }>(
+    `/api/clusters/${encodeURIComponent(clusterId)}/live-state`,
+  );
+  window.dispatchEvent(new Event("mh-clusters-changed"));
+  return latest.effective || null;
+}
+
 /**
  * Clean, Mutually-Exclusive Cluster Automation Panel (under Cluster Detail -> Automation tab).
  * A cluster operates in ONE chosen mode at a time:
@@ -822,6 +852,10 @@ export function ClusterAutomationPanel({
   const [checkBusy, setCheckBusy] = useState(false);
   const [liveCheckTask, setLiveCheckTask] =
     useState<RehearsalExecTask | null>(null);
+  const [inspectBusy, setInspectBusy] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [liveInspectTask, setLiveInspectTask] =
+    useState<RehearsalExecTask | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
@@ -840,6 +874,43 @@ export function ClusterAutomationPanel({
     },
     [clusterId], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  const updateInspectPolicy = async (patch: Partial<ClusterProbePolicy>) => {
+    if (policyBusy) return;
+    setPolicyBusy(true);
+    try {
+      await api(`/api/clusters/${encodeURIComponent(clusterId)}/live-state/policy`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      await load(true);
+      window.dispatchEvent(new Event("mh-clusters-changed"));
+      Message.success(bi("已保存实况自动巡检策略", "Saved auto-inspection policy"));
+    } catch (e) {
+      err(e);
+    } finally {
+      setPolicyBusy(false);
+    }
+  };
+
+  const runLiveInspectNow = async () => {
+    if (inspectBusy) return;
+    setInspectBusy(true);
+    try {
+      await triggerAndPollClusterLiveInspect(clusterId, (t) => setLiveInspectTask(t));
+      await load(true);
+      Message.success(
+        bi(
+          "目标主机只读实测采集已完成，主从角色、生效参数、证书与软件包已同步",
+          "Live read-only host inspection completed & merged",
+        ),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setInspectBusy(false);
+    }
+  };
 
   useEffect(() => {
     void load(false);
@@ -1521,6 +1592,182 @@ export function ClusterAutomationPanel({
           </div>
         </section>
       )}
+
+      <section className="ua-sec">
+        <div
+          className="rha-mode-banner"
+          style={{ alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}
+        >
+          <div style={{ flex: "1 1 320px", minWidth: 260 }}>
+            <div className="rha-mode-title" style={{ flexWrap: "wrap", gap: 8 }}>
+              <h2>
+                {bi(
+                  "Agent 实况采集与定时巡检",
+                  "Agent Live Telemetry & Scheduled Inspection",
+                )}
+              </h2>
+              {summary?.live_summary?.data_source === "live_agent" ? (
+                <span className="ptf-tag is-ok">
+                  {summary.live_summary.data_source_label}
+                </span>
+              ) : bound.some((a) => a.online && !a.disabled) ? (
+                <span className="ptf-tag is-ok">
+                  {bi("在线 Agent 就绪", "Online Agent Ready")}
+                </span>
+              ) : (
+                <span className="ptf-tag">
+                  {bi("待关联在线 Agent", "Requires Online Agent")}
+                </span>
+              )}
+              {(summary?.live_summary?.drift_count || 0) +
+                (summary?.live_summary?.role_drift_count || 0) >
+                0 && (
+                <button
+                  type="button"
+                  className="rha-cov-pill is-warn"
+                  style={{ cursor: "pointer", border: 0 }}
+                  onClick={() =>
+                    go({ name: "deliveries", id: clusterId, tab: "config" })
+                  }
+                >
+                  {bi(
+                    `发现 ${(summary?.live_summary?.drift_count || 0) + (summary?.live_summary?.role_drift_count || 0)} 项实测漂移 · 查看`,
+                    `${(summary?.live_summary?.drift_count || 0) + (summary?.live_summary?.role_drift_count || 0)} Drift(s) · View`,
+                  )}
+                </button>
+              )}
+            </div>
+            <p className="faint small" style={{ margin: "4px 0 0" }}>
+              {summary?.live_summary?.last_probed_at
+                ? bi(
+                    `最近实测：${ago(summary.live_summary.last_probed_at)} · 100% 只读增量更新实时角色、生效参数、线上证书与已安装软件包，绝不删除已有纳管配置。`,
+                    `Last probed ${ago(summary.live_summary.last_probed_at)} · Non-destructively updates live roles, effective params, certs, and installed packages.`,
+                  )
+                : bi(
+                    "开启定时自动巡检或点击「立即实测采集」，由在线 Agent 真实读取目标主机角色、生效参数、线上 TLS 证书与 RPM/DEB 包列表（增量合并，不覆盖已有数据）。",
+                    "Enable scheduled auto-inspection or click Inspect Now to collect real host roles, effective params, live TLS certs, and installed packages.",
+                  )}
+            </p>
+          </div>
+
+          <div
+            className="ua-sec-head-acts"
+            style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}
+          >
+            {!readOnly && canOperateCluster && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<IconThunderbolt />}
+                loading={inspectBusy}
+                disabled={
+                  !summary?.live_summary?.has_online_agent &&
+                  bound.every((a) => !a.online || a.disabled)
+                }
+                onClick={() => void runLiveInspectNow()}
+              >
+                {bi("立即实测采集", "Inspect Now")}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "12px 20px",
+            marginTop: 12,
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "1px solid var(--line)",
+            background: "var(--surface-2)",
+          }}
+        >
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 550,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Switch
+              size="small"
+              disabled={!canOperateCluster || policyBusy}
+              loading={policyBusy}
+              checked={Boolean(
+                summary?.live_summary?.probe_policy?.auto_inspect_enabled,
+              )}
+              onChange={(checked) =>
+                void updateInspectPolicy({ auto_inspect_enabled: checked })
+              }
+            />
+            <span>{bi("开启定时自动巡检", "Scheduled Auto-Inspection")}</span>
+          </label>
+
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12.5,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span className="faint">{bi("巡检周期", "Interval")}:</span>
+            <Select
+              size="small"
+              style={{ width: 152 }}
+              disabled={!canOperateCluster || policyBusy}
+              value={
+                summary?.live_summary?.probe_policy?.auto_inspect_interval_sec ||
+                1800
+              }
+              onChange={(val) =>
+                void updateInspectPolicy({
+                  auto_inspect_interval_sec: Number(val),
+                })
+              }
+              options={AUTO_INSPECT_INTERVALS.map((it) => ({
+                value: it.value,
+                label: bi(it.zh, it.en),
+              }))}
+            />
+          </div>
+
+          <Checkbox
+            disabled={!canOperateCluster || policyBusy}
+            checked={
+              summary?.live_summary?.probe_policy?.inspect_on_bind ?? true
+            }
+            onChange={(checked) =>
+              void updateInspectPolicy({ inspect_on_bind: Boolean(checked) })
+            }
+          >
+            <span className="small">
+              {bi(
+                "关联在线 Agent 后立即自动首采",
+                "Auto-inspect immediately when binding an online Agent",
+              )}
+            </span>
+          </Checkbox>
+        </div>
+
+        {liveInspectTask && (
+          <div style={{ marginTop: 12 }}>
+            <LiveExecLogCard
+              task={liveInspectTask}
+              clusterId={clusterId}
+              onCancelled={setLiveInspectTask}
+              title={bi("主机只读实测采集输出", "Live Host Telemetry Output")}
+            />
+          </div>
+        )}
+      </section>
 
       <EnrollAgentModal
         visible={enrollOpen}

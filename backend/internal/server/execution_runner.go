@@ -158,27 +158,34 @@ func executionNodeCommand(args []string) error {
 	}
 	var cachedProbe *agentHostProbe
 	var probeAt time.Time
+	hbSec := 5
 	for !runner.stop.Load() {
 		if e = runner.recoverOutbox(); e != nil {
 			logPollErr("outbox recovery pending", e)
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		if cachedProbe == nil || time.Since(probeAt) >= 15*time.Second {
-			cachedProbe = collectAgentHostProbe(3)
+		probeRefresh := time.Duration(max(10, hbSec)) * time.Second
+		if cachedProbe == nil || time.Since(probeAt) >= probeRefresh {
+			cachedProbe = collectAgentHostProbe(hbSec)
 			probeAt = time.Now()
 		}
 		var resp struct {
-			Work          *executionWork         `json:"work"`
-			Preparation   *executionPreparation  `json:"preparation"`
-			RehearsalTask *rehearsalExecDispatch `json:"rehearsal_task"`
-			CancelTasks   []string               `json:"cancel_tasks"`
+			Work                 *executionWork         `json:"work"`
+			Preparation          *executionPreparation  `json:"preparation"`
+			RehearsalTask        *rehearsalExecDispatch `json:"rehearsal_task"`
+			CancelTasks          []string               `json:"cancel_tasks"`
+			HeartbeatIntervalSec int                    `json:"heartbeat_interval_sec"`
 		}
 		pollStart := time.Now()
+		ranTask := false
 		e = runner.call("poll", map[string]any{"version": version, "protocol": 3, "probe": cachedProbe}, &resp)
 		if e != nil {
 			logPollErr("platform poll failed", e)
 		} else {
+			if resp.HeartbeatIntervalSec >= 3 && resp.HeartbeatIntervalSec <= 300 {
+				hbSec = resp.HeartbeatIntervalSec
+			}
 			if !connected {
 				latency := time.Since(pollStart).Milliseconds()
 				if everConnected {
@@ -191,6 +198,7 @@ func executionNodeCommand(args []string) error {
 				lastErr = ""
 			}
 			if resp.Preparation != nil {
+				ranTask = true
 				logAgent("INFO", "running pre-check id=%s cluster=%s", resp.Preparation.ID, resp.Preparation.Snapshot.Cluster)
 				e = runner.checkPreparation(*resp.Preparation)
 				if e != nil {
@@ -199,6 +207,7 @@ func executionNodeCommand(args []string) error {
 					logAgent("INFO", "pre-check completed id=%s cluster=%s", resp.Preparation.ID, resp.Preparation.Snapshot.Cluster)
 				}
 			} else if resp.Work != nil {
+				ranTask = true
 				logAgent("INFO", "executing run=%s step=%s", resp.Work.Run.ID, resp.Work.Step.Key)
 				e = runner.execute(*resp.Work)
 				if e != nil {
@@ -207,6 +216,7 @@ func executionNodeCommand(args []string) error {
 					logAgent("INFO", "step completed run=%s step=%s", resp.Work.Run.ID, resp.Work.Step.Key)
 				}
 			} else if resp.RehearsalTask != nil {
+				ranTask = true
 				logAgent("INFO", "executing rehearsal task=%s kind=%s targets=%d", resp.RehearsalTask.TaskID, resp.RehearsalTask.Kind, len(resp.RehearsalTask.Targets))
 				e = runner.executeRehearsalTask(*resp.RehearsalTask)
 				if e != nil {
@@ -219,7 +229,17 @@ func executionNodeCommand(args []string) error {
 		if runner.stop.Load() {
 			break
 		}
-		time.Sleep(3 * time.Second)
+		waitDur := time.Duration(hbSec) * time.Second
+		if ranTask {
+			waitDur = time.Second
+		}
+		for slept := time.Duration(0); slept < waitDur && !runner.stop.Load(); slept += time.Second {
+			step := time.Second
+			if rem := waitDur - slept; rem < step {
+				step = rem
+			}
+			time.Sleep(step)
+		}
 	}
 	logAgent("INFO", "execution-node stopped cleanly")
 	return nil

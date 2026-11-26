@@ -187,10 +187,27 @@ type rcaEntry struct {
 
 func (s *storeServer) docIndex(cluster string) docIndex {
 	var x docIndex
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, "index"); err == nil && ok {
+			_ = json.Unmarshal(b, &x)
+		}
+		return x
+	}
 	if b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "docs", cluster, "index.json")); err == nil {
 		_ = json.Unmarshal(b, &x)
 	}
 	return x
+}
+
+func (s *storeServer) docIndexSave(cluster string, idx docIndex) error {
+	if s.repo != nil {
+		b, err := json.Marshal(idx)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, "index", b)
+	}
+	return writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", cluster, "index.json"), idx)
 }
 
 func (x docIndex) rca(id string) (rcaEntry, bool) {
@@ -214,7 +231,11 @@ func (s *storeServer) docPath(cluster, doc string) string {
 
 func (s *storeServer) docLoad(cluster, doc string) docSaved {
 	out := docSaved{Sections: map[string]docSection{}}
-	if b, err := os.ReadFile(s.docPath(cluster, doc)); err == nil {
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, doc); err == nil && ok {
+			_ = json.Unmarshal(b, &out)
+		}
+	} else if b, err := os.ReadFile(s.docPath(cluster, doc)); err == nil {
 		_ = json.Unmarshal(b, &out)
 	}
 	if out.Sections == nil {
@@ -224,7 +245,22 @@ func (s *storeServer) docLoad(cluster, doc string) docSaved {
 }
 
 func (s *storeServer) docSave(cluster, doc string, d docSaved) error {
+	if s.repo != nil {
+		b, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, doc, b)
+	}
 	return writeJSONFile(s.docPath(cluster, doc), d)
+}
+
+func (s *storeServer) docDelete(cluster, doc string) {
+	if s.repo != nil {
+		_ = s.repo.deleteClusterDoc(cluster, doc)
+		return
+	}
+	_ = os.Remove(s.docPath(cluster, doc))
 }
 
 func (s *storeServer) clusterDocMetaPath(cluster string) string {
@@ -233,6 +269,12 @@ func (s *storeServer) clusterDocMetaPath(cluster string) string {
 
 func (s *storeServer) clusterDocMetaLoad(cluster string) docMeta {
 	var m docMeta
+	if s.repo != nil {
+		if b, ok, err := s.repo.getClusterDoc(cluster, "meta"); err == nil && ok {
+			_ = json.Unmarshal(b, &m)
+		}
+		return m
+	}
 	if b, err := os.ReadFile(s.clusterDocMetaPath(cluster)); err == nil {
 		_ = json.Unmarshal(b, &m)
 	}
@@ -240,6 +282,13 @@ func (s *storeServer) clusterDocMetaLoad(cluster string) docMeta {
 }
 
 func (s *storeServer) clusterDocMetaSave(cluster string, m docMeta) error {
+	if s.repo != nil {
+		b, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return s.repo.saveClusterDoc(cluster, "meta", b)
+	}
 	return writeJSONFile(s.clusterDocMetaPath(cluster), m)
 }
 
@@ -1418,7 +1467,7 @@ func (s *storeServer) upsertChangeNoteDoc(clusterID string, rep aiReport) string
 			idx.Changes[i].Model = rep.Model
 			idx.Changes[i].Updated = now
 			idx.Changes[i].By = rep.By
-			_ = writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx)
+			_ = s.docIndexSave(clusterID, idx)
 			return idx.Changes[i].ID
 		}
 	}
@@ -1438,7 +1487,7 @@ func (s *storeServer) upsertChangeNoteDoc(clusterID string, rep aiReport) string
 		By:        rep.By,
 	}
 	idx.Changes = append([]changeNoteEntry{e}, idx.Changes...)
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", clusterID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(clusterID, idx); err != nil {
 		return ""
 	}
 	return e.ID
@@ -1721,9 +1770,7 @@ func (s *storeServer) reportSettings() reportSettings {
 		Header:       "{cluster} · {title}",
 		Footer:       "{org}",
 	}
-	if b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "settings", "report.json")); err == nil {
-		_ = json.Unmarshal(b, &r)
-	}
+	_ = s.loadSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), &r)
 	r.Theme = themeOf(r.Theme).ID
 	if strings.TrimSpace(r.DocVersion) == "" {
 		r.DocVersion = "V1.0"
@@ -1839,7 +1886,7 @@ func (s *storeServer) handleReportSettings(w http.ResponseWriter, r *http.Reques
 		in.Template = cur.Template
 		in.Banner = cur.Banner
 		in.UseTemplate = in.UseTemplate && cur.Template != ""
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), in); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), in); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1947,7 +1994,7 @@ func (s *storeServer) handleReportBanner(w http.ResponseWriter, r *http.Request,
 		}
 		rs := s.reportSettings()
 		rs.Banner = truncRunes(filepath.Base(header.Filename), 120)
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -1957,7 +2004,7 @@ func (s *storeServer) handleReportBanner(w http.ResponseWriter, r *http.Request,
 		_ = os.Remove(s.reportBannerPath())
 		rs := s.reportSettings()
 		rs.Banner = ""
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2005,7 +2052,7 @@ func (s *storeServer) handleReportTemplate(w http.ResponseWriter, r *http.Reques
 		}
 		rs := s.reportSettings()
 		rs.Template, rs.UseTemplate = truncRunes(filepath.Base(header.Filename), 120), true
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2015,7 +2062,7 @@ func (s *storeServer) handleReportTemplate(w http.ResponseWriter, r *http.Reques
 		_ = os.Remove(s.reportTemplatePath())
 		rs := s.reportSettings()
 		rs.Template, rs.UseTemplate = "", false
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
+		if err := s.saveSettingDoc("report_settings", filepath.Join(s.cfg.DataDir, "settings", "report.json"), rs); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2281,6 +2328,8 @@ func (s *storeServer) handleCluster(w http.ResponseWriter, r *http.Request, sess
 		s.handleRehearsals(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "automation":
 		s.handleClusterAutomation(w, r, session, f, parts[2:])
+	case len(parts) >= 2 && parts[1] == "live-state":
+		s.handleClusterLiveState(w, r, session, f, parts[2:])
 	case len(parts) >= 2 && parts[1] == "security":
 		s.handleClusterSecurity(w, r, session, f, parts[2:])
 	case len(parts) == 2 && parts[1] == "baseline":
@@ -2502,7 +2551,7 @@ func (s *storeServer) startRCA(w http.ResponseWriter, r *http.Request, session s
 		}
 		e := assessEntry{ID: "assess-" + randomStoreToken(6), Type: in.Type, Question: q, Created: time.Now().UTC().Format(time.RFC3339Nano), By: session.User}
 		idx.Assess = append(idx.Assess, e)
-		if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+		if err := s.docIndexSave(f.ID, idx); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -2533,7 +2582,7 @@ func (s *storeServer) startRCA(w http.ResponseWriter, r *http.Request, session s
 		e.ID = "rca-x" + randomStoreToken(6)
 	}
 	idx.RCA = append(idx.RCA, e)
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(f.ID, idx); err != nil {
 		s.fail(w, 500, "保存失败，请稍后重试")
 		return
 	}
@@ -2578,11 +2627,11 @@ func (s *storeServer) dropRCA(w http.ResponseWriter, r *http.Request, session st
 		return
 	}
 	idx.RCA = keep
-	if err := writeJSONFile(filepath.Join(s.cfg.DataDir, "docs", f.ID, "index.json"), idx); err != nil {
+	if err := s.docIndexSave(f.ID, idx); err != nil {
 		s.fail(w, 500, "删除失败，请稍后重试")
 		return
 	}
-	_ = os.Remove(s.docPath(f.ID, id))
+	s.docDelete(f.ID, id)
 	s.auditReq(r, "doc-rca-delete", session.User, f.ID+" "+id)
 	s.writeJSON(w, 200, map[string]bool{"ok": true})
 }

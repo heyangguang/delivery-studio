@@ -102,12 +102,25 @@ func ParseSources(data []byte) ([]Source, error) {
 type Sources struct {
 	List []Source
 	// Custom is the administrator's file content, as saved.
-	Custom []Source
-	path   string
+	Custom    []Source
+	rawCustom string
+	path      string
+	saveFn    func([]byte) error
 }
 
 // LoadSources reads the built-in list and the administrator's file (which may not exist).
 func LoadSources(customPath string) (*Sources, error) {
+	var raw []byte
+	if customPath != "" {
+		if b, err := os.ReadFile(customPath); err == nil {
+			raw = b
+		}
+	}
+	return LoadSourcesWithCustom(raw, customPath)
+}
+
+// LoadSourcesWithCustom merges built-in sources with administrator YAML bytes (e.g. from PostgreSQL).
+func LoadSourcesWithCustom(customYAML []byte, customPath string) (*Sources, error) {
 	data, err := builtin.ReadFile("sources.yaml")
 	if err != nil {
 		return nil, err
@@ -116,12 +129,10 @@ func LoadSources(customPath string) (*Sources, error) {
 	if err != nil {
 		return nil, fmt.Errorf("内置软件源：%w", err)
 	}
-	s := &Sources{path: customPath}
-	if customPath != "" {
-		if b, err := os.ReadFile(customPath); err == nil {
-			if s.Custom, err = ParseSources(b); err != nil {
-				return nil, err
-			}
+	s := &Sources{path: customPath, rawCustom: string(customYAML)}
+	if len(bytes.TrimSpace(customYAML)) > 0 {
+		if s.Custom, err = ParseSources(customYAML); err != nil {
+			return nil, err
 		}
 	}
 	over := map[string]Source{}
@@ -143,6 +154,21 @@ func LoadSources(customPath string) (*Sources, error) {
 		}
 	}
 	return s, nil
+}
+
+// SetSaver configures an external persistence callback (such as PostgreSQL) for Save().
+func (s *Sources) SetSaver(fn func([]byte) error) {
+	if s != nil {
+		s.saveFn = fn
+	}
+}
+
+// CustomYAML returns the raw custom YAML text currently loaded.
+func (s *Sources) CustomYAML() string {
+	if s == nil {
+		return ""
+	}
+	return s.rawCustom
 }
 
 // ForPlatform lists the enabled sources for a platform.
@@ -178,17 +204,28 @@ func (s *Sources) Key(name string) ([]byte, error) {
 
 // Save writes the administrator's source list. The list is validated first.
 func (s *Sources) Save(data []byte) error {
-	if s.path == "" {
-		return fmt.Errorf("未配置软件源文件位置")
-	}
 	if _, err := ParseSources(data); err != nil {
 		return err
+	}
+	if s.saveFn != nil {
+		if err := s.saveFn(data); err != nil {
+			return err
+		}
+		s.rawCustom = string(data)
+		return nil
+	}
+	if s.path == "" {
+		return fmt.Errorf("未配置软件源文件位置")
 	}
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	s.rawCustom = string(data)
+	return nil
 }
 
 // BuiltinYAML returns the shipped list, as a starting point for editing.

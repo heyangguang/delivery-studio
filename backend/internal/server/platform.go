@@ -25,8 +25,11 @@ type platformConfig struct {
 	LibraryDir    string
 	SourcesFile   string
 	// Runtimes maps an operating system id to the offline Ansible runtime archive its controller unpacks.
-	Runtimes map[string]string
-	Docker   string
+	Runtimes      map[string]string
+	Docker        string
+	Repo          *storeRepository
+	LoadSourcesFn func() ([]byte, error)
+	SaveSourcesFn func([]byte) error
 }
 
 // platform owns what generation needs besides the request: the component catalog, plain offline files, the package
@@ -86,7 +89,20 @@ func loadPlatform(cfg platformConfig) (*platform, error) {
 }
 
 func (p *platform) reloadSources() error {
-	s, err := pkglib.LoadSources(p.cfg.SourcesFile)
+	var s *pkglib.Sources
+	var err error
+	if p.cfg.LoadSourcesFn != nil {
+		raw, lerr := p.cfg.LoadSourcesFn()
+		if lerr != nil {
+			return lerr
+		}
+		s, err = pkglib.LoadSourcesWithCustom(raw, p.cfg.SourcesFile)
+		if err == nil && p.cfg.SaveSourcesFn != nil {
+			s.SetSaver(p.cfg.SaveSourcesFn)
+		}
+	} else {
+		s, err = pkglib.LoadSources(p.cfg.SourcesFile)
+	}
 	if err != nil {
 		return err
 	}
@@ -133,7 +149,25 @@ func (p *platform) load(packs string) (*mwpack.Catalog, []brokenComponent, error
 	}
 	sources := []fs.FS{catalog.FS}
 	var broken []brokenComponent
-	if packs != "" {
+	if p.cfg.Repo != nil {
+		if rows, err := p.cfg.Repo.listLiveComponents(); err == nil {
+			for _, row := range rows {
+				if row.Name == "" || row.Name == sharedPlatformName || strings.HasPrefix(row.Name, ".") {
+					continue
+				}
+				one := single{fileSetToFS(row.Name, row.Files), row.Name}
+				if _, err := mwpack.LoadCatalog(catalog.FS, one); err != nil {
+					msg := err.Error()
+					if i := strings.Index(msg, "：\n"); i >= 0 {
+						msg = strings.TrimSpace(msg[i+len("：\n"):])
+					}
+					broken = append(broken, brokenComponent{row.Name, msg})
+					continue
+				}
+				sources = append(sources, one)
+			}
+		}
+	} else if packs != "" {
 		if entries, err := os.ReadDir(packs); err == nil {
 			custom := os.DirFS(packs)
 			for _, e := range entries {

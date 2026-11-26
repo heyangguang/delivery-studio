@@ -360,6 +360,14 @@ func (s *storeServer) loadRehearsal(cluster, rid string) (changeRehearsal, bool)
 	if !docClusterID.MatchString(cluster) || !reRehearsalID.MatchString(rid) {
 		return rh, false
 	}
+	if s.repo != nil {
+		got, ok, err := s.repo.getRehearsal(cluster, rid)
+		if err != nil || !ok || got.ID == "" {
+			return changeRehearsal{}, false
+		}
+		got.RestorationAlerts = auditRehearsalRestorations(got.Goal, got.ExtraScope, got.Steps, "zh-CN")
+		return got, true
+	}
 	b, err := os.ReadFile(s.rehearsalPath(cluster, rid))
 	if err != nil || json.Unmarshal(b, &rh) != nil || rh.ID == "" {
 		return changeRehearsal{}, false
@@ -372,7 +380,19 @@ func (s *storeServer) saveRehearsal(rh changeRehearsal) error {
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, "zh-CN")
 	rh.ConflictAlerts = nil // always computed dynamically against live cluster peers
 	rh.UpdatedAt = nowStamp()
+	if s.repo != nil {
+		return s.repo.saveRehearsal(rh)
+	}
 	return writeJSONFile(s.rehearsalPath(rh.ClusterID, rh.ID), rh)
+}
+
+func (s *storeServer) deleteRehearsalRecord(cluster, rid string) {
+	if s.repo != nil {
+		_ = s.repo.deleteRehearsal(cluster, rid)
+	} else {
+		_ = os.Remove(s.rehearsalPath(cluster, rid))
+	}
+	_ = os.RemoveAll(s.rehearsalImgDir(cluster, rid))
 }
 
 func (s *storeServer) listRehearsalsLang(cluster, lang string) []changeRehearsal {
@@ -388,6 +408,16 @@ func (s *storeServer) listRehearsals(cluster string) []changeRehearsal {
 	out := []changeRehearsal{}
 	if !docClusterID.MatchString(cluster) {
 		return out
+	}
+	if s.repo != nil {
+		list, err := s.repo.listClusterRehearsals(cluster)
+		if err != nil || list == nil {
+			return out
+		}
+		for i := range list {
+			list[i].RestorationAlerts = auditRehearsalRestorations(list[i].Goal, list[i].ExtraScope, list[i].Steps, "zh-CN")
+		}
+		return list
 	}
 	entries, err := os.ReadDir(s.rehearsalDir(cluster))
 	if err != nil {
@@ -1619,8 +1649,7 @@ func (s *storeServer) handleRehearsals(w http.ResponseWriter, r *http.Request, s
 		rehearsalMu.Lock()
 		_, ok := s.loadRehearsal(f.ID, rid)
 		if ok {
-			_ = os.Remove(s.rehearsalPath(f.ID, rid))
-			_ = os.RemoveAll(s.rehearsalImgDir(f.ID, rid))
+			s.deleteRehearsalRecord(f.ID, rid)
 		}
 		rehearsalMu.Unlock()
 		if !ok {
@@ -5535,6 +5564,7 @@ func (s *storeServer) applyRehearsalProduction(w http.ResponseWriter, r *http.Re
 			rehearsalMu.Unlock()
 		}
 	}
+	s.syncAppliedRehearsalsToClusterState(f.ID, session.User)
 	s.auditReq(r, action, session.User, f.ID+" "+rid)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, lang)
 	rh.ConflictAlerts = computeRehearsalConflicts(rh, peers, lang)
@@ -5605,6 +5635,7 @@ func (s *storeServer) voidRehearsal(w http.ResponseWriter, r *http.Request, sess
 	if !wantVoid {
 		act = "rehearsal-restore"
 	}
+	s.syncAppliedRehearsalsToClusterState(f.ID, session.User)
 	s.auditReq(r, act, session.User, f.ID+" "+rid)
 	lang := reqLang(r)
 	rh.RestorationAlerts = auditRehearsalRestorations(rh.Goal, rh.ExtraScope, rh.Steps, lang)

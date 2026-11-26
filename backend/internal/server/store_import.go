@@ -3466,17 +3466,10 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 	return dep, compID, displayName, ver, nil
 }
 
-func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
-	outDir := filepath.Join(dir, "output")
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
-		return err
-	}
+func encodeImportedPlanBytes(dep *mwpack.Deployment, plan *mwpack.Plan) ([]byte, []byte, error) {
 	specBytes, err := dep.YAML()
 	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "deployment.yml"), specBytes, 0o600); err != nil {
-		return err
+		return nil, nil, err
 	}
 	pv := plan.View()
 	planDoc := map[string]any{
@@ -3497,9 +3490,38 @@ func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Pla
 	}
 	planBytes, err := json.MarshalIndent(planDoc, "", "  ")
 	if err != nil {
+		return nil, nil, err
+	}
+	return specBytes, planBytes, nil
+}
+
+func writeImportedPlanFiles(dir string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
+	specBytes, planBytes, err := encodeImportedPlanBytes(dep, plan)
+	if err != nil {
+		return err
+	}
+	outDir := filepath.Join(dir, "output")
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deployment.yml"), specBytes, 0o600); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, "plan.json"), planBytes, 0o600)
+}
+
+func (s *storeServer) saveImportedPlanFiles(jobID string, dep *mwpack.Deployment, plan *mwpack.Plan) error {
+	specBytes, planBytes, err := encodeImportedPlanBytes(dep, plan)
+	if err != nil {
+		return err
+	}
+	if s.repo != nil {
+		if err := s.writeJobSpecBytes(jobID, dep.ID, specBytes); err != nil {
+			return err
+		}
+		return s.writeJobPlanAndLock(jobID, dep.ID, planBytes, nil)
+	}
+	return writeImportedPlanFiles(s.jobDir(jobID), dep, plan)
 }
 
 func (s *storeServer) invalidateJobCaches(jobID string) {
@@ -3559,7 +3581,7 @@ func (s *storeServer) importCluster(w http.ResponseWriter, r *http.Request, sess
 	s.mu.Unlock()
 
 	dir := s.jobDir(jobID)
-	if err := writeImportedPlanFiles(dir, dep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(jobID, dep, plan); err != nil {
 		s.removeFailedReservation(jobID)
 		_ = os.RemoveAll(dir)
 		s.fail(w, 500, "保存纳管基线文件失败："+err.Error())
@@ -3742,7 +3764,7 @@ func (s *storeServer) handleClusterBaseline(w http.ResponseWriter, r *http.Reque
 
 		s.jobPersistMu.Lock()
 		defer s.jobPersistMu.Unlock()
-		if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+		if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 			s.fail(w, 500, "更新基线文件失败："+err.Error())
 			return
 		}
@@ -3840,7 +3862,7 @@ func (s *storeServer) handleClusterBaselineGaps(w http.ResponseWriter, r *http.R
 	dep.Imported.BaselineUpdatedAt = now
 	dep.Imported.BaselineUpdatedBy = session.User
 	plan := mwpack.SolveImported(s.plat.cat(), dep)
-	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), dep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(f.Current.ID, dep, plan); err != nil {
 		s.jobPersistMu.Unlock()
 		s.fail(w, 500, "保存基线忽略状态失败："+err.Error())
 		return
@@ -4165,7 +4187,7 @@ func (s *storeServer) enrichImportedBaselineFromEvidence(
 
 	s.jobPersistMu.Lock()
 	defer s.jobPersistMu.Unlock()
-	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 		return nil
 	}
 	s.invalidateJobCaches(f.Current.ID)
@@ -4244,6 +4266,42 @@ func (s *storeServer) applyBaselineCorrectionsToCluster(
 			s.jobs[j.ID] = j
 			s.mu.Unlock()
 		}
+		rec := s.loadClusterStateRecord(f.ID)
+		if rec.Overrides.Params == nil {
+			rec.Overrides.Params = map[string]string{}
+		}
+		for _, c := range corrections {
+			nv := strings.TrimSpace(c.NewValue)
+			if nv == "" {
+				continue
+			}
+			switch c.Kind {
+			case "port", "param":
+				pk := firstNonEmptyStr(strings.TrimSpace(c.Key), c.Kind)
+				nk := normClusterParamKey(pk)
+				if nk != "" {
+					rec.Overrides.Params[nk] = nv
+					rec.Overrides.Entries = upsertOverrideEntry(rec.Overrides.Entries, clusterOverrideEntry{
+						Key:         pk,
+						Before:      strings.TrimSpace(c.OldValue),
+						After:       nv,
+						SourceID:    "manual_calibration",
+						SourceTitle: firstNonEmptyStr(sourceTitle, "现场基线校准"),
+						By:          by,
+						At:          now,
+					})
+				}
+			case "service_unit":
+				rec.Overrides.ServiceUnits = mergeUniqueStrings(rec.Overrides.ServiceUnits, []string{nv})
+			case "config_path":
+				rec.Overrides.ConfigPaths = mergeUniqueStrings(rec.Overrides.ConfigPaths, []string{nv})
+			case "data_dir":
+				rec.Overrides.DataDirs = mergeUniqueStrings(rec.Overrides.DataDirs, []string{nv})
+			}
+		}
+		rec.Overrides.UpdatedAt = now
+		rec.Overrides.UpdatedBy = by
+		_ = s.saveClusterStateRecord(rec)
 		return summary
 	}
 
@@ -4489,7 +4547,7 @@ func (s *storeServer) applyBaselineCorrectionsToCluster(
 
 	s.jobPersistMu.Lock()
 	defer s.jobPersistMu.Unlock()
-	if err := writeImportedPlanFiles(s.jobDir(f.Current.ID), newDep, plan); err != nil {
+	if err := s.saveImportedPlanFiles(f.Current.ID, newDep, plan); err != nil {
 		return nil
 	}
 	s.invalidateJobCaches(f.Current.ID)

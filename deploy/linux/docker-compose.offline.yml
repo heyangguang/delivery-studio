@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: delivery-studio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ds_offline_pg_2026}
+      POSTGRES_DB: delivery_studio
+      TZ: Asia/Shanghai
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d delivery_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  delivery-studio:
+    image: delivery-studio:1.0.0
+    container_name: delivery-studio-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8080}:8080"
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      PORT: "8080"
+      TZ: Asia/Shanghai
+      DELIVERY_STUDIO_DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-ds_offline_pg_2026}@postgres:5432/delivery_studio?sslmode=disable"
+    volumes:
+      - ./data:/var/lib/delivery-studio
+      - ./seed:/opt/delivery-studio/seed:ro

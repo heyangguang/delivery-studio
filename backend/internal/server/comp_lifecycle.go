@@ -117,7 +117,19 @@ func (s *storeServer) compVerifyPath(name string) string {
 }
 
 func (s *storeServer) loadCompVerifications(name string) []compVerification {
-	if s.cfg.DataDir == "" || !safeName(name) {
+	if !safeName(name) {
+		return []compVerification{}
+	}
+	if s.repo != nil {
+		if row, ok, err := s.repo.getComponentSlot(name, "verifications"); err == nil && ok && len(row.Meta) > 0 {
+			var out []compVerification
+			if json.Unmarshal(row.Meta, &out) == nil && out != nil {
+				return out
+			}
+		}
+		return []compVerification{}
+	}
+	if s.cfg.DataDir == "" {
 		return []compVerification{}
 	}
 	b, err := os.ReadFile(s.compVerifyPath(name))
@@ -132,11 +144,17 @@ func (s *storeServer) loadCompVerifications(name string) []compVerification {
 }
 
 func (s *storeServer) saveCompVerifications(name string, list []compVerification) error {
-	if s.cfg.DataDir == "" || !safeName(name) {
+	if !safeName(name) {
 		return nil
 	}
 	if list == nil {
 		list = []compVerification{}
+	}
+	if s.repo != nil {
+		return s.repo.saveComponentSlot(name, "verifications", 0, fileSet{}, list)
+	}
+	if s.cfg.DataDir == "" {
+		return nil
 	}
 	return writeJSONFile(s.compVerifyPath(name), list)
 }
@@ -408,7 +426,7 @@ type jobPlanLite struct {
 }
 
 func (s *storeServer) readJobManifestHash(jobID, comp string) string {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(jobID), "output", "deployment.lock.json"))
+	b, err := s.readJobLockBytes(jobID)
 	if err != nil {
 		return ""
 	}
@@ -430,7 +448,7 @@ func (s *storeServer) readJobManifestHash(jobID, comp string) string {
 }
 
 func (s *storeServer) readJobPlanRaw(jobID string) []byte {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(jobID), "output", "plan.json"))
+	b, err := s.readJobPlanBytes(jobID)
 	if err != nil {
 		return nil
 	}
@@ -1044,12 +1062,23 @@ func mutateVersionYAMLNode(raw []byte, ver, newStatus string, addPlatforms []str
 //  2. Extracts structured Ubuntu 24.04 verification evidence from existing passing deliveries (preferring verify-*)
 //     and archives them under <DataDir>/comp-verifications/<comp>.json so the component pages show real history immediately.
 func (s *storeServer) migrateComponentLifecycle() {
-	if s.cfg.DataDir == "" || s.plat == nil || len(s.jobs) == 0 {
+	if s.plat == nil || len(s.jobs) == 0 {
 		return
 	}
-	marker := filepath.Join(s.cfg.DataDir, "comp-verifications", ".migrated-v1")
-	if _, err := os.Stat(marker); err == nil {
-		return
+	const migKey = "comp_lifecycle_v1"
+	marker := ""
+	if s.repo != nil {
+		if s.repo.hasMigration(migKey) {
+			return
+		}
+	} else {
+		if s.cfg.DataDir == "" {
+			return
+		}
+		marker = filepath.Join(s.cfg.DataDir, "comp-verifications", ".migrated-v1")
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
 	}
 	cat := s.plat.cat()
 
@@ -1062,8 +1091,7 @@ func (s *storeServer) migrateComponentLifecycle() {
 	s.mu.Unlock()
 
 	for _, j := range allJobs {
-		planPath := filepath.Join(s.jobDir(j.ID), "output", "plan.json")
-		b, err := os.ReadFile(planPath)
+		b, err := s.readJobPlanBytes(j.ID)
 		if err != nil {
 			continue
 		}
@@ -1128,7 +1156,7 @@ func (s *storeServer) migrateComponentLifecycle() {
 		}
 		if changed {
 			if out, err := json.MarshalIndent(doc, "", "  "); err == nil {
-				_ = os.WriteFile(planPath, out, 0o600)
+				_ = s.writeJobPlanAndLock(j.ID, j.ClusterID, out, nil)
 			}
 		}
 	}
@@ -1197,6 +1225,10 @@ func (s *storeServer) migrateComponentLifecycle() {
 			}
 		}
 	}
-	_ = os.MkdirAll(filepath.Dir(marker), 0o700)
-	_ = os.WriteFile(marker, []byte(now()+"\n"), 0o600)
+	if s.repo != nil {
+		_ = s.repo.recordMigration(migKey, map[string]any{"done": true})
+	} else if marker != "" {
+		_ = os.MkdirAll(filepath.Dir(marker), 0o700)
+		_ = os.WriteFile(marker, []byte(now()+"\n"), 0o600)
+	}
 }

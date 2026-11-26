@@ -77,27 +77,16 @@ func isLocalDevHostname(host string) bool {
 	if strings.EqualFold(host, "localhost") || host == "0.0.0.0" {
 		return true
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsUnspecified() {
+	// Allow any IP literal (loopback, private LAN, or server IP mapped into a Docker bridge container);
+	// DNS rebinding only applies to domain names, never raw IP literals in the Host header.
+	if ip := net.ParseIP(host); ip != nil {
 		return true
 	}
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, a := range addrs {
-		var ifIP net.IP
-		switch v := a.(type) {
-		case *net.IPNet:
-			ifIP = v.IP
-		case *net.IPAddr:
-			ifIP = v.IP
-		}
-		if ifIP != nil && ifIP.Equal(ip) {
-			return true
+	if extra := strings.TrimSpace(os.Getenv("DELIVERY_STUDIO_ALLOWED_HOSTS")); extra != "" {
+		for _, item := range strings.Split(extra, ",") {
+			if h := strings.TrimSpace(item); h != "" && strings.EqualFold(h, host) {
+				return true
+			}
 		}
 	}
 	return false

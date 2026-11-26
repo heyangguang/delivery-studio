@@ -147,6 +147,10 @@ func (s *storeServer) aiRecordUsage(u aiUsage) {
 			u.Cost, u.Currency = s.priceOf(p, m, u)
 		}
 	}
+	if s.repo != nil {
+		_ = s.repo.saveAIUsage(u)
+		return
+	}
 	aiMu.Lock()
 	defer aiMu.Unlock()
 	s.migrateUsage()
@@ -188,28 +192,38 @@ func (s *storeServer) migrateUsage() {
 
 // usageBetween reads the records in [from, to), oldest first.
 func (s *storeServer) usageBetween(from, to time.Time) []aiUsage {
-	aiMu.Lock()
-	s.migrateUsage()
-	aiMu.Unlock()
 	var out []aiUsage
-	for m := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC); m.Before(to); m = m.AddDate(0, 1, 0) {
-		f, err := os.Open(filepath.Join(s.usageDir(), m.Format("2006-01")+".jsonl"))
-		if err != nil {
-			continue
-		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		for sc.Scan() {
-			var u aiUsage
-			if json.Unmarshal(sc.Bytes(), &u) != nil {
-				continue
-			}
+	if s.repo != nil {
+		rows, _ := s.repo.listAIUsageBetween(from.UTC().Format(time.RFC3339Nano), to.UTC().Format(time.RFC3339Nano))
+		for _, u := range rows {
 			t, err := time.Parse(time.RFC3339Nano, u.At)
 			if err == nil && !t.Before(from) && t.Before(to) {
 				out = append(out, u)
 			}
 		}
-		f.Close()
+	} else {
+		aiMu.Lock()
+		s.migrateUsage()
+		aiMu.Unlock()
+		for m := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC); m.Before(to); m = m.AddDate(0, 1, 0) {
+			f, err := os.Open(filepath.Join(s.usageDir(), m.Format("2006-01")+".jsonl"))
+			if err != nil {
+				continue
+			}
+			sc := bufio.NewScanner(f)
+			sc.Buffer(make([]byte, 64<<10), 1<<20)
+			for sc.Scan() {
+				var u aiUsage
+				if json.Unmarshal(sc.Bytes(), &u) != nil {
+					continue
+				}
+				t, err := time.Parse(time.RFC3339Nano, u.At)
+				if err == nil && !t.Before(from) && t.Before(to) {
+					out = append(out, u)
+				}
+			}
+			f.Close()
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At < out[j].At })
 	// calls made before a price was known are priced now, so adding a price shows in the history too

@@ -78,13 +78,20 @@ type secLinkedRehearsal struct {
 }
 
 type clusterSecurityReport struct {
-	ClusterID         string               `json:"cluster_id"`
-	AppID             string               `json:"app_id"`
-	AppName           string               `json:"app_name"`
-	Version           string               `json:"version"`
-	Platform          string               `json:"platform"`
-	DeliveryMode      string               `json:"delivery_mode"`
-	Hosts             []string             `json:"hosts"`
+	ClusterID           string               `json:"cluster_id"`
+	AppID               string               `json:"app_id"`
+	AppName             string               `json:"app_name"`
+	Version             string               `json:"version"`
+	Platform            string               `json:"platform"`
+	DeliveryMode        string               `json:"delivery_mode"`
+	DataSource          string               `json:"data_source,omitempty"`
+	DataSourceLabel     string               `json:"data_source_label,omitempty"`
+	LastProbedAt        string               `json:"last_probed_at,omitempty"`
+	HasBoundAgent       bool                 `json:"has_bound_agent,omitempty"`
+	HasOnlineAgent      bool                 `json:"has_online_agent,omitempty"`
+	ActiveInspectTaskID string               `json:"active_inspect_task_id,omitempty"`
+	DriftCount          int                  `json:"drift_count,omitempty"`
+	Hosts               []string             `json:"hosts"`
 	ScannedAt         string               `json:"scanned_at,omitempty"`
 	HasScan           bool                 `json:"has_scan"`
 	Score             int                  `json:"score"`
@@ -191,20 +198,33 @@ func (s *storeServer) auditClusterSecurity(user string, f clusterFacts) clusterS
 	autoJobs := s.autoExecutedJobs()
 	effMode := effectiveDeliveryMode(f.Current.ID, rawMode, autoJobs)
 
+	effView := s.buildClusterEffectiveView(f, f.Lang)
+	ver := f.Current.Version
+	if effView.Live != nil && effView.Live.ExactVersion != "" {
+		ver = effView.Live.ExactVersion
+	}
+
 	rep := clusterSecurityReport{
-		ClusterID:      f.ID,
-		AppID:          f.Current.AppID,
-		AppName:        firstNonEmptyStr(f.Current.AppName, f.Current.AppID),
-		Version:        f.Current.Version,
-		Platform:       pl,
-		DeliveryMode:   effMode,
-		Hosts:          nz(hosts),
-		Deductions:     []secScoreDeduction{},
-		Findings:       []secFinding{},
-		PackageGroups:  []secPackageGroup{},
-		BaselineChecks: []secBaselineCheck{},
-		Certs:          []secCertCheck{},
-		Rehearsals:     []secLinkedRehearsal{},
+		ClusterID:           f.ID,
+		AppID:               f.Current.AppID,
+		AppName:             firstNonEmptyStr(f.Current.AppName, f.Current.AppID),
+		Version:             ver,
+		Platform:            pl,
+		DeliveryMode:        effMode,
+		DataSource:          effView.Summary.DataSource,
+		DataSourceLabel:     effView.Summary.DataSourceLabel,
+		LastProbedAt:        effView.Summary.LastProbedAt,
+		HasBoundAgent:       effView.Summary.HasBoundAgent,
+		HasOnlineAgent:      effView.Summary.HasOnlineAgent,
+		ActiveInspectTaskID: effView.Summary.ActiveInspectTaskID,
+		DriftCount:          effView.Summary.DriftCount,
+		Hosts:               nz(hosts),
+		Deductions:          []secScoreDeduction{},
+		Findings:            []secFinding{},
+		PackageGroups:       []secPackageGroup{},
+		BaselineChecks:      []secBaselineCheck{},
+		Certs:               []secCertCheck{},
+		Rehearsals:          []secLinkedRehearsal{},
 	}
 
 	// 1. Scoped CVE findings for this cluster.
@@ -264,8 +284,8 @@ func (s *storeServer) auditClusterSecurity(user string, f clusterFacts) clusterS
 		}
 	}
 
-	// 2. TLS certificate inspection from delivery materials (supports versioned change projects like .01 and historical plan fallback).
-	certs := s.inspectClusterCertificates(f)
+	// 2. TLS certificate inspection: prefer live measured X.509 certificates, supplemented non-destructively by delivery bundle certs.
+	certs := s.inspectClusterCertificatesWithLive(f, effView)
 	rep.Certs = certs
 	var expiredCerts, critCerts, expiringCerts, weakCerts []string
 	for _, c := range certs {
@@ -289,8 +309,8 @@ func (s *storeServer) auditClusterSecurity(user string, f clusterFacts) clusterS
 		}
 	}
 
-	// 3. Deterministic Config Security Baseline Audit on deployment.yml & solved plan.
-	checks := s.evaluateConfigBaseline(f, dep, certs, expiredCerts, critCerts, expiringCerts, weakCerts)
+	// 3. Deterministic Config Security Baseline Audit across Live Telemetry + Applied Rehearsals + Spec.
+	checks := s.evaluateConfigBaseline(f, dep, effView, certs, expiredCerts, critCerts, expiringCerts, weakCerts)
 	for i := range checks {
 		if wv, ok := waivers[f.ID+"|"+checks[i].ID]; ok && checks[i].Status != "pass" {
 			checks[i].Waived = true
@@ -588,23 +608,68 @@ func certKeyInfo(c *x509.Certificate) (string, int) {
 	}
 }
 
+func (s *storeServer) inspectClusterCertificatesWithLive(f clusterFacts, effView clusterEffectiveView) []secCertCheck {
+	staticCerts := s.inspectClusterCertificates(f)
+	if effView.Live == nil || len(effView.Live.Certs) == 0 {
+		return staticCerts
+	}
+	out := make([]secCertCheck, 0, len(effView.Live.Certs)+len(staticCerts))
+	seen := map[string]bool{}
+	liveInst := map[string]bool{}
+	for _, lc := range effView.Live.Certs {
+		k := lc.Instance + "|" + lc.Subject + "|" + lc.NotAfter
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, lc)
+		}
+		if lc.Role == "server" && lc.Instance != "" {
+			liveInst[lc.Instance] = true
+		}
+	}
+	// Non-destructively preserve static delivery certificates for instances not covered by live probing
+	for _, sc := range staticCerts {
+		k := sc.Instance + "|" + sc.Subject + "|" + sc.NotAfter
+		if seen[k] || liveInst[sc.Instance] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, sc)
+	}
+	return out
+}
+
 func (s *storeServer) evaluateConfigBaseline(
 	f clusterFacts,
 	dep *mwpack.Deployment,
+	effView clusterEffectiveView,
 	certs []secCertCheck,
 	expiredCerts, critCerts, expiringCerts, weakCerts []string,
 ) []secBaselineCheck {
 	checks := []secBaselineCheck{}
 
-	// Tailored governance checks for brownfield imported clusters (avoiding false positives on undeclared install-time fields).
+	// Tailored governance checks for brownfield imported clusters (enriched with live telemetry when present).
 	if dep != nil && dep.DeliveryMode == "imported" {
 		meta := dep.Imported
-		hasPkg := meta != nil && len(meta.Packages) > 0
-		hasExact := meta != nil && strings.TrimSpace(meta.ExactVersion) != "" && meta.ExactVersion != "unknown"
+		pkgCount := 0
+		if meta != nil {
+			pkgCount = len(meta.Packages)
+		}
+		if effView.Live != nil && len(effView.Live.Packages) > pkgCount {
+			pkgCount = len(effView.Live.Packages)
+		}
+		exactVer := ""
+		if meta != nil {
+			exactVer = strings.TrimSpace(meta.ExactVersion)
+		}
+		if effView.Live != nil && effView.Live.ExactVersion != "" {
+			exactVer = effView.Live.ExactVersion
+		}
+		hasPkg := pkgCount > 0
+		hasExact := exactVer != "" && exactVer != "unknown"
 		if hasPkg || hasExact {
-			detail := fmt.Sprintf("已采集 %d 个软件包", len(meta.Packages))
+			detail := fmt.Sprintf("已采集 %d 个软件包", pkgCount)
 			if !hasPkg {
-				detail = fmt.Sprintf("已登记精确版本 %s（建议后续补充只读探针采集完整 OS 软件包清单）", meta.ExactVersion)
+				detail = fmt.Sprintf("已登记精确版本 %s（建议后续补充只读探针采集完整 OS 软件包清单）", exactVer)
 			}
 			checks = append(checks, secBaselineCheck{
 				ID:       "imported-sbom-coverage",
@@ -622,7 +687,7 @@ func (s *storeServer) evaluateConfigBaseline(
 				Severity:       "MEDIUM",
 				Status:         "warn",
 				Detail:         "尚未采集精确版本号与软件包清单，当前无法做完整 CVE 匹配",
-				Recommendation: "在集群「概览」或「配置」点击「重新只读采集」，运行只读探针并粘贴回显即可自动补齐软件包清单。",
+				Recommendation: "关联在线 Agent 一键实测采集，或运行只读探针粘贴回显即可自动补齐软件包清单。",
 			})
 		}
 		if len(dep.Hosts) >= 2 {
@@ -645,7 +710,8 @@ func (s *storeServer) evaluateConfigBaseline(
 				Recommendation: "如生产环境为单机实例，建议评估高可用改造并通过「变更演练」规划演练方案。",
 			})
 		}
-		hasPaths := meta != nil && (len(meta.ConfigPaths) > 0 || len(meta.DataDirs) > 0 || len(meta.ServiceUnits) > 0)
+		hasPaths := (meta != nil && (len(meta.ConfigPaths) > 0 || len(meta.DataDirs) > 0 || len(meta.ServiceUnits) > 0)) ||
+			(effView.Live != nil && (len(effView.Live.ConfigPaths) > 0 || len(effView.Live.DataDirs) > 0 || len(effView.Live.ServiceUnits) > 0))
 		if hasPaths {
 			checks = append(checks, secBaselineCheck{
 				ID:       "imported-runtime-paths",
@@ -653,7 +719,7 @@ func (s *storeServer) evaluateConfigBaseline(
 				Title:    "运行路径与服务单元基线完整性",
 				Severity: "LOW",
 				Status:   "pass",
-				Detail:   "已登记服务单元或配置/数据目录，变更演练可直接生成精确现场命令",
+				Detail:   "已核实服务单元或配置/数据目录，变更演练可直接生成精确现场命令",
 			})
 		} else {
 			checks = append(checks, secBaselineCheck{
@@ -663,26 +729,109 @@ func (s *storeServer) evaluateConfigBaseline(
 				Severity:       "LOW",
 				Status:         "warn",
 				Detail:         "尚未登记配置路径、数据目录或 systemd 服务单元",
-				Recommendation: "在「配置」页补充实际路径信息，可显著提升变更演练脚本与 SOP 精准度。",
+				Recommendation: "在「配置」页补充实际路径信息或发起 Agent 实测采集，可显著提升变更演练脚本与 SOP 精准度。",
 			})
+		}
+		// If live telemetry or overrides measured TLS / CIDR on this imported cluster, audit them too!
+		if v, hasTLS := effView.EffectiveParams["tls"]; hasTLS || len(certs) > 0 {
+			tlsOn := len(certs) > 0 || equivParamValues(stringifyParamVal(v), "true")
+			if tlsOn {
+				checks = append(checks, secBaselineCheck{
+					ID:       "tls_enabled",
+					Category: "encryption",
+					Title:    "传输层 TLS 加密",
+					Severity: "HIGH",
+					Status:   "pass",
+					Detail:   "实测已开启 TLS 传输加密。",
+				})
+			} else {
+				checks = append(checks, secBaselineCheck{
+					ID:             "tls_enabled",
+					Category:       "encryption",
+					Title:          "传输层 TLS 加密",
+					Severity:       "HIGH",
+					Status:         "fail",
+					Detail:         "实测当前未启用 TLS 传输加密，内网明文流量存在窃听风险。",
+					Recommendation: "建议签发内网 CA 证书并通过变更演练平滑开启 TLS。",
+					RehearsalKind:  "config_hardening",
+				})
+			}
+		}
+		if effView.Live != nil && len(effView.Live.ClientCIDRs) > 0 {
+			var openImp []string
+			for _, tok := range effView.Live.ClientCIDRs {
+				if tok == "0.0.0.0/0" || tok == "::/0" || strings.HasSuffix(tok, "/0") || strings.HasSuffix(tok, "/8") {
+					openImp = append(openImp, tok)
+				}
+			}
+			if len(openImp) > 0 {
+				checks = append(checks, secBaselineCheck{
+					ID:             "client_cidr_open",
+					Category:       "network",
+					Title:          "客户端访问网段最小化（CIDR 白名单）",
+					Severity:       "HIGH",
+					Status:         "fail",
+					Target:         strings.Join(openImp, ", "),
+					Detail:         fmt.Sprintf("实测检测到过宽的放行网段：%s。", strings.Join(openImp, "、")),
+					Recommendation: "建议将白名单收紧至具体业务应用子网 CIDR。",
+					RehearsalKind:  "config_hardening",
+				})
+			} else {
+				checks = append(checks, secBaselineCheck{
+					ID:       "client_cidr_open",
+					Category: "network",
+					Title:    "客户端访问网段最小化（CIDR 白名单）",
+					Severity: "HIGH",
+					Status:   "pass",
+					Detail:   "实测客户端认证白名单未发现 0.0.0.0/0 等过宽放行规则。",
+				})
+			}
 		}
 		return checks
 	}
 
-	// Inspect instances from solved plan (effective defaults merged), plan.json fallback, or deployment.yml + schema defaults.
+	// Inspect instances from solved plan (effective defaults merged), overlaid with Layer-2 applied rehearsals & Layer-3 live telemetry!
 	var tlsSupported, tlsDisabled []string
 	var tdeSupported, tdeDisabled []string
 	var openCIDRs []string
 
 	certsByInst := map[string]bool{}
+	anyLiveServerCert := false
 	for _, c := range certs {
 		if c.Role == "server" && c.Instance != "" {
 			certsByInst[c.Instance] = true
+			anyLiveServerCert = true
 		}
 	}
 
+	effByNorm := map[string]any{}
+	for k, v := range effView.EffectiveParams {
+		effByNorm[normClusterParamKey(k)] = v
+	}
+
 	cat := s.plat.cat()
-	inspectParams := func(instID, compName string, params map[string]any) {
+	inspectParams := func(instID, compName string, rawParams map[string]any, isPrimaryInst bool) {
+		params := map[string]any{}
+		for k, v := range rawParams {
+			params[k] = v
+		}
+		if isPrimaryInst {
+			for nk, ev := range effByNorm {
+				matchedKey := ""
+				for k := range params {
+					if normClusterParamKey(k) == nk {
+						matchedKey = k
+						break
+					}
+				}
+				if matchedKey != "" {
+					params[matchedKey] = ev
+				} else {
+					params[nk] = ev
+				}
+			}
+		}
+
 		hasTLSSchema, hasTDESchema := false, false
 		tlsDefault, tdeDefault := false, false
 		if comp, ok := cat.Get(compName); ok {
@@ -703,17 +852,13 @@ func (s *storeServer) evaluateConfigBaseline(
 				}
 			}
 		}
-		if v, exists := params["tls"]; exists || hasTLSSchema || certsByInst[instID] {
+		if v, exists := params["tls"]; exists || hasTLSSchema || certsByInst[instID] || (isPrimaryInst && anyLiveServerCert) {
 			tlsSupported = append(tlsSupported, instID)
 			enabled := tlsDefault
 			if exists {
-				if b, ok := v.(bool); ok {
-					enabled = b
-				} else {
-					enabled = strings.EqualFold(strings.TrimSpace(fmt.Sprintf("%v", v)), "true")
-				}
+				enabled = equivParamValues(stringifyParamVal(v), "true")
 			}
-			if certsByInst[instID] {
+			if certsByInst[instID] || (isPrimaryInst && anyLiveServerCert && !exists) {
 				enabled = true
 			}
 			if !enabled {
@@ -724,11 +869,7 @@ func (s *storeServer) evaluateConfigBaseline(
 			tdeSupported = append(tdeSupported, instID)
 			enabled := tdeDefault
 			if exists {
-				if b, ok := v.(bool); ok {
-					enabled = b
-				} else {
-					enabled = strings.EqualFold(strings.TrimSpace(fmt.Sprintf("%v", v)), "true")
-				}
+				enabled = equivParamValues(stringifyParamVal(v), "true")
 			}
 			if !enabled {
 				tdeDisabled = append(tdeDisabled, instID)
@@ -736,7 +877,7 @@ func (s *storeServer) evaluateConfigBaseline(
 		}
 		for k, v := range params {
 			lk := strings.ToLower(k)
-			if !strings.Contains(lk, "cidr") && !strings.Contains(lk, "allow") {
+			if !strings.Contains(lk, "cidr") && !strings.Contains(lk, "allow") && lk != "pg_hba" {
 				continue
 			}
 			sv := strings.TrimSpace(fmt.Sprintf("%v", v))
@@ -751,19 +892,19 @@ func (s *storeServer) evaluateConfigBaseline(
 		}
 	}
 
-	// Prefer f.Plan.Instances (contains solved effective params including component defaults like tls=true, tde=true).
+	// Prefer f.Plan.Instances, overlaid with live/applied effective params on primary instance.
 	inspected := false
 	if f.Plan != nil && len(f.Plan.Instances) > 0 {
-		for _, inst := range f.Plan.Instances {
+		for idx, inst := range f.Plan.Instances {
 			if !inst.External {
-				inspectParams(inst.ID, inst.Component, inst.Params)
+				isPrim := inst.Component == f.Current.AppID || idx == 0
+				inspectParams(inst.ID, inst.Component, inst.Params, isPrim)
 				inspected = true
 			}
 		}
 	}
 	if !inspected && f.Current.ID != "" {
-		// Fallback to persisted output/plan.json for historical deliveries whose schema may have evolved.
-		if raw, err := os.ReadFile(filepath.Join(s.jobDir(f.Current.ID), "output", "plan.json")); err == nil {
+		if raw, err := s.readJobPlanBytes(f.Current.ID); err == nil {
 			var pj struct {
 				Instances []struct {
 					ID        string         `json:"id"`
@@ -773,9 +914,10 @@ func (s *storeServer) evaluateConfigBaseline(
 				} `json:"instances"`
 			}
 			if json.Unmarshal(raw, &pj) == nil && len(pj.Instances) > 0 {
-				for _, inst := range pj.Instances {
+				for idx, inst := range pj.Instances {
 					if !inst.External {
-						inspectParams(inst.ID, inst.Component, inst.Params)
+						isPrim := inst.Component == f.Current.AppID || idx == 0
+						inspectParams(inst.ID, inst.Component, inst.Params, isPrim)
 						inspected = true
 					}
 				}
@@ -783,8 +925,9 @@ func (s *storeServer) evaluateConfigBaseline(
 		}
 	}
 	if !inspected && dep != nil {
-		for _, inst := range dep.Instances {
-			inspectParams(inst.ID, inst.Component, inst.Params)
+		for idx, inst := range dep.Instances {
+			isPrim := inst.Component == f.Current.AppID || idx == 0
+			inspectParams(inst.ID, inst.Component, inst.Params, isPrim)
 		}
 	}
 

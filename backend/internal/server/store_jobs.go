@@ -72,11 +72,15 @@ func (s *storeServer) deleteJobData(id string) (int, string) {
 	if filepath.Dir(target) != root || filepath.Base(target) != id {
 		return 500, "任务路径无效"
 	}
-	if st, err := os.Lstat(target); err != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+	if st, err := os.Lstat(target); err == nil {
+		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+			return 500, "任务目录无效"
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return 500, "交付材料删除失败"
+		}
+	} else if !os.IsNotExist(err) {
 		return 500, "任务目录无效"
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return 500, "交付材料删除失败"
 	}
 	s.purgeJobExecutions(id)
 	s.evictJobCaches(id)
@@ -302,6 +306,12 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 		if isTempVerificationJob(j) {
 			verifyTargets = s.jobPromotionTargets(j, session.User)
 		}
+		var effState any
+		if j.ClusterID != "" && j.State == "succeeded" {
+			if cf, ok := s.clusterFactsFor(session.User, j.ClusterID); ok {
+				effState = s.buildClusterEffectiveView(cf, lang)
+			}
+		}
 		s.writeJSON(w, 200, map[string]any{
 			"job":                  j,
 			"files":                files,
@@ -309,6 +319,7 @@ func (s *storeServer) handleJob(w http.ResponseWriter, r *http.Request, session 
 			"plan":                 mwpack.LocalizePlanJSON(lang, rawPlan),
 			"lineage":              s.lineageOf(j),
 			"verification_promote": verifyTargets,
+			"effective_state":      effState,
 		})
 		return
 	}

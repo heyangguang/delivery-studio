@@ -111,7 +111,7 @@ func (s *storeServer) deliveryTar(id string) string {
 			IP   string `json:"ip"`
 		} `json:"hosts"`
 	}
-	if b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "plan.json")); err == nil && json.Unmarshal(b, &p) == nil {
+	if b, err := s.readJobPlanBytes(id); err == nil && json.Unmarshal(b, &p) == nil {
 		if e := p.ExecutionHost; e != nil {
 			for _, f := range files {
 				if strings.HasSuffix(filepath.Base(f), "-"+e.IP+".tar.gz") {
@@ -143,7 +143,7 @@ func (s *storeServer) projectPrefix(id string) string {
 	var p struct {
 		Dir string `json:"project_dir"`
 	}
-	if b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "plan.json")); err == nil {
+	if b, err := s.readJobPlanBytes(id); err == nil {
 		_ = json.Unmarshal(b, &p)
 	}
 	name := path.Base(p.Dir)

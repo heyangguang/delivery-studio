@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,9 +47,7 @@ func (s *storeServer) pricesPath() string { return filepath.Join(s.settingsDir()
 
 func (s *storeServer) loadPriceSettings() priceSettings {
 	ps := priceSettings{Display: "CNY", Rate: 7.2}
-	if b, err := os.ReadFile(s.pricesPath()); err == nil {
-		_ = json.Unmarshal(b, &ps)
-	}
+	_ = s.loadSettingDoc("ai_prices", s.pricesPath(), &ps)
 	if ps.Display != "USD" {
 		ps.Display = "CNY"
 	}
@@ -170,7 +167,7 @@ func (s *storeServer) handleAIPrices(w http.ResponseWriter, r *http.Request) {
 			in.Rate = 7.2
 		}
 		sort.SliceStable(in.Custom, func(a, b int) bool { return in.Custom[a].Vendor < in.Custom[b].Vendor })
-		if err := writeJSONFile(s.pricesPath(), in); err != nil {
+		if err := s.saveSettingDoc("ai_prices", s.pricesPath(), in); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}

@@ -686,7 +686,48 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 			rawMode = dep.DeliveryMode
 		}
 		effMode := effectiveDeliveryMode(cur.ID, rawMode, autoJobs)
-		if effMode == "imported" && dep != nil && dep.Imported != nil {
+		stateRec := s.loadClusterStateRecord(cid)
+		if stateRec.Live != nil && len(stateRec.Live.Packages) > 0 {
+			ecos := platformToOSVEcosystems(pl)
+			ecoDisp := pl
+			if len(ecos) > 0 {
+				ecoDisp = ecos[0]
+			}
+			ecoKey := normalizeEcoKey(ecoDisp)
+			platTitle := pl
+			if def, ok := mwpack.PlatformByID(pl); ok && def.Title != "" {
+				platTitle = def.Title
+			}
+			for _, hl := range stateRec.Live.Hosts {
+				if hl.OSDetail != "" {
+					platTitle = hl.OSDetail
+					break
+				}
+			}
+			liveClusterKey := "live:" + cid
+			cvKeys = []string{liveClusterKey}
+			for _, pk := range stateRec.Live.Packages {
+				if pk.Name == "" || pk.Version == "" {
+					continue
+				}
+				role := pk.Role
+				if role == "" {
+					role = classifySecPkgRole("os_package", pk.Name, []string{cur.AppID}, primaryPkgNames)
+				}
+				addItem(secSBOMItem{
+					AssetType:     "os_package",
+					PkgRole:       role,
+					Platform:      pl,
+					PlatformTitle: platTitle,
+					Ecosystem:     ecoDisp,
+					OSVEcosystems: ecos,
+					EcoKey:        ecoKey,
+					Package:       pk.Name,
+					Version:       pk.Version,
+					Components:    []string{liveClusterKey},
+				})
+			}
+		} else if effMode == "imported" && dep != nil && dep.Imported != nil {
 			ecos := platformToOSVEcosystems(pl)
 			ecoDisp := pl
 			if len(ecos) > 0 {
@@ -699,10 +740,8 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 			} else if dep.Imported.OSDetail != "" {
 				platTitle = dep.Imported.OSDetail
 			}
-			cvKey := ""
-			if len(cvKeys) > 0 {
-				cvKey = cvKeys[0]
-			}
+			impClusterKey := "cluster:" + cid
+			cvKeys = []string{impClusterKey}
 			hasPrimaryPkg := false
 			for _, pk := range dep.Imported.Packages {
 				if pk.Name == "" || pk.Version == "" {
@@ -715,10 +754,6 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 				if role == "primary" {
 					hasPrimaryPkg = true
 				}
-				comps := []string{}
-				if cvKey != "" {
-					comps = []string{cvKey}
-				}
 				addItem(secSBOMItem{
 					AssetType:     "os_package",
 					PkgRole:       role,
@@ -729,16 +764,12 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 					EcoKey:        ecoKey,
 					Package:       pk.Name,
 					Version:       pk.Version,
-					Components:    comps,
+					Components:    []string{impClusterKey},
 				})
 			}
 			if !hasPrimaryPkg {
 				declVer := firstNonEmptyStr(dep.Imported.ExactVersion, cur.Version)
 				if declVer != "" && declVer != "unknown" && cur.AppID != "" {
-					comps := []string{}
-					if cvKey != "" {
-						comps = []string{cvKey}
-					}
 					addItem(secSBOMItem{
 						AssetType:     "component_declared",
 						PkgRole:       "primary",
@@ -749,7 +780,7 @@ func (s *storeServer) extractSBOM() secSBOMInventory {
 						EcoKey:        ecoKey,
 						Package:       cur.AppID,
 						Version:       declVer,
-						Components:    comps,
+						Components:    []string{impClusterKey},
 					})
 				}
 			}

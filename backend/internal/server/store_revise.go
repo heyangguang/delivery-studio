@@ -84,24 +84,38 @@ func (s *storeServer) lineageOf(j storeJob) *lineage {
 }
 
 func (s *storeServer) readSpec(id string) *mwpack.Deployment {
-	path := filepath.Join(s.jobDir(id), "deployment.yml")
-	st, statErr := os.Stat(path)
-	if statErr != nil {
-		return nil
-	}
-	mod := st.ModTime().UnixNano()
-	sz := st.Size()
-
-	s.cacheMu.RLock()
-	if hit, ok := s.specCache[id]; ok && hit.modTime == mod && hit.size == sz {
+	var mod, sz int64
+	if s.repo != nil {
+		s.cacheMu.RLock()
+		if hit, ok := s.specCache[id]; ok && hit.modTime == -1 {
+			s.cacheMu.RUnlock()
+			return hit.dep
+		}
 		s.cacheMu.RUnlock()
-		return hit.dep
-	}
-	s.cacheMu.RUnlock()
+		mod = -1
+	} else {
+		path := filepath.Join(s.jobDir(id), "deployment.yml")
+		st, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil
+		}
+		mod = st.ModTime().UnixNano()
+		sz = st.Size()
 
-	b, err := os.ReadFile(path)
+		s.cacheMu.RLock()
+		if hit, ok := s.specCache[id]; ok && hit.modTime == mod && hit.size == sz {
+			s.cacheMu.RUnlock()
+			return hit.dep
+		}
+		s.cacheMu.RUnlock()
+	}
+
+	b, err := s.readJobSpecBytes(id)
 	if err != nil {
 		return nil
+	}
+	if sz == 0 {
+		sz = int64(len(b))
 	}
 	d, err := mwpack.ParseSavedDeployment(b)
 	if err != nil {
@@ -141,7 +155,7 @@ func (s *storeServer) specChanges(from, to string) []Change {
 		var lock struct {
 			Instances []struct{ ID, Component, Version string }
 		}
-		if raw, err := os.ReadFile(filepath.Join(s.jobDir(from), "output", "deployment.lock.json")); err == nil && json.Unmarshal(raw, &lock) == nil {
+		if raw, err := s.readJobLockBytes(from); err == nil && json.Unmarshal(raw, &lock) == nil {
 			cp := *a
 			cp.Instances = append([]mwpack.InstanceSpec{}, a.Instances...)
 			for _, li := range lock.Instances {
@@ -325,7 +339,7 @@ func specDiff(a, b *mwpack.Deployment) []Change {
 
 // lockPackages reads name -> versions from a delivery's package lock; empty when the lock is missing.
 func (s *storeServer) lockPackages(id string) map[string][]string {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "deployment.lock.json"))
+	b, err := s.readJobLockBytes(id)
 	if err != nil {
 		return nil
 	}

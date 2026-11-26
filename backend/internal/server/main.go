@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	version            = "1.0.0"
-	currentReleaseDate = "2026-11-25"
+	version            = "1.5.0"
+	currentReleaseDate = "2026-11-26"
 )
 
 // buildID can be injected at compile time via `-ldflags "-X main.buildID=..."`.
@@ -65,6 +65,22 @@ type releaseNote struct {
 }
 
 var platformReleaseNotes = []releaseNote{
+	{
+		Version: "1.5.0",
+		Date:    "2026-11-26",
+		Title:   "全量 PostgreSQL 去本地文件化、在线 Agent 实测驱动与离线 Docker 一键交付",
+		TitleEn: "Full PostgreSQL State Convergence, Live Agent Telemetry & One-Click Offline Docker",
+		Highlights: []string{
+			"全量去本地文件化：将部署规格、执行计划、软件源、自定义组件、IAM、AI 供应商/密钥/MCP/沙箱/知识库/用量及安全扫描状态统一收敛至 PostgreSQL，消除本地 YAML/JSON 单点依赖",
+			"在线 Agent 实测采集驱动：支持集群级定时静默巡检开关与周期配置、一键实测采集主机角色/生效参数/TLS 证书/已安装包、非破坏性合并与配置漂移比对，并支持全局与单节点心跳周期配置",
+			"离线 Docker 全栈交付与体验升级：新增含 PostgreSQL 16 与全量数据的 8080 端口一键离线容器部署包；重做创建交付角色分配胶囊、提问卡片内联自定义输入、建议卡片折叠记忆及运行手册分栏布局",
+		},
+		HighlightsEn: []string{
+			"Full PostgreSQL convergence: migrated deployment specs, plans, sources, custom components, IAM, AI providers/keys/MCP/sandbox/KB/usage, and security scans from local YAML/JSON files into PostgreSQL",
+			"Live Agent telemetry: added per-cluster scheduled read-only inspection, one-click live collection of host roles/runtime params/TLS certs/packages, non-destructive baseline merge with drift detection, and configurable Agent heartbeat intervals",
+			"Offline Docker & UX polish: added self-contained port-8080 offline Docker + PostgreSQL bundle; redesigned wizard host placement chips, inline custom inputs on AI AskCards, session-collapsible suggestion cards, and runbook sidebar layout",
+		},
+	},
 	{
 		Version: "1.0.0",
 		Date:    "2026-11-25",

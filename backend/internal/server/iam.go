@@ -1,9 +1,7 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -261,19 +259,24 @@ var (
 
 func (s *storeServer) iamFile() string { return s.aiFile("iam.json") }
 
+func (s *storeServer) iamCacheKey() string {
+	if s.repo != nil {
+		return "pg:" + s.cfg.PublicURL + ":" + s.cfg.DataDir
+	}
+	return s.iamFile()
+}
+
 // iamLoad returns a copy the caller may change; call it with iamMu held.
 func (s *storeServer) iamLoad() iamState {
-	f := s.iamFile()
-	st, ok := iamCache[f]
+	key := s.iamCacheKey()
+	st, ok := iamCache[key]
 	if !ok {
 		st = iamState{Roles: []role{}, Teams: []team{}, Grants: map[string]grant{}}
-		if b, err := os.ReadFile(f); err == nil {
-			_ = json.Unmarshal(b, &st)
-		}
+		_ = s.loadSettingDoc("iam", s.iamFile(), &st)
 		if st.Grants == nil {
 			st.Grants = map[string]grant{}
 		}
-		iamCache[f] = st
+		iamCache[key] = st
 	}
 	out := iamState{Roles: append([]role{}, st.Roles...), Teams: make([]team, len(st.Teams)), Grants: map[string]grant{}, Deleted: append([]deletedUser{}, st.Deleted...)}
 	for i, t := range st.Teams {
@@ -291,10 +294,10 @@ func (s *storeServer) iamLoad() iamState {
 
 // iamSave writes the state and replaces what is cached; call it with iamMu held.
 func (s *storeServer) iamSave(st iamState) error {
-	if err := writeJSONFile(s.iamFile(), st); err != nil {
+	if err := s.saveSettingDoc("iam", s.iamFile(), st); err != nil {
 		return err
 	}
-	iamCache[s.iamFile()] = st
+	iamCache[s.iamCacheKey()] = st
 	return nil
 }
 
@@ -554,6 +557,8 @@ var routePerms = []routePerm{
 	rp("GET", `/api/clusters/[^/]+/automation(/.*)?`, "delivery.view"),
 	rp("W", `/api/clusters/[^/]+/automation/agents(/.*)?`, "execution.manage|delivery.execute"),
 	rp("W", `/api/clusters/[^/]+/automation(/.*)?`, "delivery.execute|execution.manage"),
+	rp("GET", `/api/clusters/[^/]+/live-state(/.*)?`, "delivery.view"),
+	rp("W", `/api/clusters/[^/]+/live-state(/.*)?`, "delivery.execute|execution.manage|delivery.create|security.scan|security.manage"),
 	rp("GET", `/api/clusters/[^/]+/rehearsals(/.*)?`, "delivery.view"),
 	rp("W", `/api/clusters/[^/]+/rehearsals/[^/]+/exec(/.*)?`, "delivery.execute"),
 	rp("W", `/api/clusters/[^/]+/rehearsals/[^/]+/sync-vex`, "security.manage"),

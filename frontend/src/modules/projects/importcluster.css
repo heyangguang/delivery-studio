@@ -1139,8 +1139,16 @@ body[arco-theme="dark"] {
   min-width: 0;
 }
 
-.imp-pflow-step {
+.imp-tip-anchor {
+  display: inline-flex;
+  align-items: center;
+}
+
+.imp-pflow-step,
+.imp-pflow-steps button {
   all: unset;
+  appearance: none;
+  -webkit-appearance: none;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -1148,6 +1156,7 @@ body[arco-theme="dark"] {
   height: 30px;
   padding: 0 11px 0 7px;
   border-radius: 999px;
+  font-family: inherit;
   font-size: 12.5px;
   font-weight: 560;
   color: var(--mute);

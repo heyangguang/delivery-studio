@@ -106,9 +106,7 @@ func (s *storeServer) progressPath(id string) string {
 
 func (s *storeServer) readProgress(id string) progressDoc {
 	doc := progressDoc{Steps: map[string]stepRecord{}, Events: []progressEvent{}}
-	if b, err := os.ReadFile(s.progressPath(id)); err == nil {
-		_ = json.Unmarshal(b, &doc)
-	}
+	_ = s.loadJobDocValue(id, "progress_json", s.progressPath(id), &doc)
 	if doc.Steps == nil {
 		doc.Steps = map[string]stepRecord{}
 	}
@@ -133,6 +131,9 @@ func (s *storeServer) writeProgress(id string, doc progressDoc) error {
 	}
 	if len(b) > maxProgressDoc {
 		return errProgressFull
+	}
+	if s.repo != nil {
+		return s.repo.upsertJobDocCol(id, "progress_json", b)
 	}
 	tmp := s.progressPath(id) + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
@@ -611,7 +612,8 @@ func (s *storeServer) handleProgress(w http.ResponseWriter, r *http.Request, ses
 		s.mu.Lock()
 		doc := s.readProgress(id)
 		if everything {
-			_ = os.Remove(s.progressPath(id))
+			_ = s.saveJobDocValue(id, "progress_json", s.progressPath(id), nil)
+			_ = s.saveJobDocValue(id, "run_logs_json", "", nil)
 			_ = os.RemoveAll(s.progressImgDir(id))
 			_ = os.RemoveAll(s.runLogDir(id))
 			doc = progressDoc{Steps: map[string]stepRecord{}, Events: []progressEvent{}}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -279,15 +278,8 @@ func ensureSingleDefaultTemplate(list []secReportTemplate) []secReportTemplate {
 
 func (s *storeServer) loadSecReportTemplates() []secReportTemplate {
 	defaults := defaultSecReportTemplates()
-	if s.cfg.DataDir == "" {
-		return defaults
-	}
-	b, err := os.ReadFile(filepath.Join(s.secDir(), "report-templates.json"))
-	if err != nil {
-		return defaults
-	}
 	var saved []secReportTemplate
-	if json.Unmarshal(b, &saved) != nil || len(saved) == 0 {
+	if !s.loadSettingDoc("security_report_templates", filepath.Join(s.secDir(), "report-templates.json"), &saved) || len(saved) == 0 {
 		return defaults
 	}
 	byID := map[string]bool{}
@@ -312,11 +304,8 @@ func (s *storeServer) loadSecReportTemplates() []secReportTemplate {
 }
 
 func (s *storeServer) saveSecReportTemplates(list []secReportTemplate) error {
-	if s.cfg.DataDir == "" {
-		return nil
-	}
 	list = ensureSingleDefaultTemplate(list)
-	return writeJSONFile(filepath.Join(s.secDir(), "report-templates.json"), list)
+	return s.saveSettingDoc("security_report_templates", filepath.Join(s.secDir(), "report-templates.json"), list)
 }
 
 func (s *storeServer) resolveSecReportTemplate(id string) secReportTemplate {

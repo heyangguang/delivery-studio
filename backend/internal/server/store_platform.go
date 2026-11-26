@@ -399,7 +399,8 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 		materials[in.Instance+"/"+in.Name+"/server.key"] = m.Key
 		materials[in.Instance+"/"+in.Name+"/ca.crt"] = m.CA
 	}
-	if b, err := plan.Normalized().YAML(); err != nil || os.WriteFile(filepath.Join(dir, "deployment.yml"), b, 0600) != nil {
+	specBytes, specErr := plan.Normalized().YAML()
+	if specErr != nil || s.writeJobSpecBytes(id, j.ClusterID, specBytes) != nil {
 		failUpload("保存配置失败，请稍后重试")
 		return
 	}
@@ -414,12 +415,18 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 		s.sem <- struct{}{}
 		defer func() { <-s.sem }()
 		s.updateJob(id, "running", "开始生成", "")
-		err := s.generate(plan, materials, filepath.Join(dir, "output"), func(m string) { s.updateJob(id, "running", m, "") })
+		outDir := filepath.Join(dir, "output")
+		err := s.generate(plan, materials, outDir, func(m string) { s.updateJob(id, "running", m, "") })
 		os.RemoveAll(filepath.Join(dir, "certificates")) // validated material now lives only in the delivery
 		if err != nil {
 			s.updateJob(id, "failed", "生成失败", err.Error())
 			s.audit("job-failed", session.User, id)
 		} else {
+			if s.repo != nil {
+				pb, _ := os.ReadFile(filepath.Join(outDir, "plan.json"))
+				lb, _ := os.ReadFile(filepath.Join(outDir, "deployment.lock.json"))
+				_ = s.writeJobPlanAndLock(id, j.ClusterID, pb, lb)
+			}
 			s.updateJob(id, "succeeded", "交付材料已生成", "")
 			s.audit("job-succeeded", session.User, id)
 			if input.Revises != "" {
@@ -472,7 +479,7 @@ func (s *storeServer) generate(plan *mwpack.Plan, materials map[string][]byte, o
 
 // jobSpec returns what the user submitted, as YAML, for display and for "create again from this".
 func (s *storeServer) jobSpec(id string) any {
-	b, err := os.ReadFile(filepath.Join(s.jobDir(id), "deployment.yml"))
+	b, err := s.readJobSpecBytes(id)
 	if err != nil {
 		return nil
 	}
@@ -493,27 +500,39 @@ func (s *storeServer) jobSpec(id string) any {
 // jobPlan returns the structured handbook (plan.json) of a generated delivery. Deliveries made before a display field
 // existed (role names, data flows) lack it, so those fields are filled in from the submitted specification solved
 // against the current catalog; nothing that was generated changes.
-// Results are cached in memory keyed by plan.json's (ModTime, Size), and modern plans that already contain
-// role_titles bypass the expensive mwpack.Solve() legacy backfill entirely.
 func (s *storeServer) jobPlan(id string) json.RawMessage {
-	path := filepath.Join(s.jobDir(id), "output", "plan.json")
-	st, statErr := os.Stat(path)
-	if statErr != nil {
-		return nil
-	}
-	mod := st.ModTime().UnixNano()
-	sz := st.Size()
-
-	s.cacheMu.RLock()
-	if hit, ok := s.planCache[id]; ok && hit.modTime == mod && hit.size == sz {
+	var mod, sz int64
+	if s.repo != nil {
+		s.cacheMu.RLock()
+		if hit, ok := s.planCache[id]; ok && hit.modTime == -1 {
+			s.cacheMu.RUnlock()
+			return hit.raw
+		}
 		s.cacheMu.RUnlock()
-		return hit.raw
-	}
-	s.cacheMu.RUnlock()
+		mod = -1
+	} else {
+		path := filepath.Join(s.jobDir(id), "output", "plan.json")
+		st, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil
+		}
+		mod = st.ModTime().UnixNano()
+		sz = st.Size()
 
-	b, err := os.ReadFile(path)
-	if err != nil {
+		s.cacheMu.RLock()
+		if hit, ok := s.planCache[id]; ok && hit.modTime == mod && hit.size == sz {
+			s.cacheMu.RUnlock()
+			return hit.raw
+		}
+		s.cacheMu.RUnlock()
+	}
+
+	b, err := s.readJobPlanBytes(id)
+	if err != nil || len(b) == 0 {
 		return nil
+	}
+	if sz == 0 {
+		sz = int64(len(b))
 	}
 	res := json.RawMessage(b)
 	var doc map[string]json.RawMessage
@@ -531,7 +550,7 @@ func (s *storeServer) jobPlan(id string) json.RawMessage {
 		}
 		changed := false
 		if needsPackages {
-			if lb, err := os.ReadFile(filepath.Join(s.jobDir(id), "output", "deployment.lock.json")); err == nil {
+			if lb, err := s.readJobLockBytes(id); err == nil {
 				var lockDoc struct {
 					Instances []struct {
 						ID       string                  `json:"id"`
@@ -560,7 +579,7 @@ func (s *storeServer) jobPlan(id string) json.RawMessage {
 			}
 		}
 		if needsBackfill {
-			if spec, err := os.ReadFile(filepath.Join(s.jobDir(id), "deployment.yml")); err == nil {
+			if spec, err := s.readJobSpecBytes(id); err == nil {
 				if dep, err := mwpack.ParseSavedDeployment(spec); err == nil {
 					view := mwpack.Solve(s.plat.cat(), dep).View()
 					byID := map[string]mwpack.InstanceView{}

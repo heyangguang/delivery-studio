@@ -45,8 +45,19 @@ var teamKBMu sync.Mutex
 func (s *storeServer) teamKBDir(kind string) string { return s.aiFile(filepath.Join("kb-team", kind)) }
 
 func (s *storeServer) teamDocs() []teamDoc {
-	files, _ := filepath.Glob(filepath.Join(s.teamKBDir("docs"), "*.json"))
 	out := []teamDoc{}
+	if s.repo != nil {
+		m, _ := s.repo.listKV("kb_team:docs", 0)
+		for _, b := range m {
+			var d teamDoc
+			if json.Unmarshal(b, &d) == nil && d.ID != "" {
+				out = append(out, d)
+			}
+		}
+		sort.Slice(out, func(a, b int) bool { return out[a].Updated > out[b].Updated })
+		return out
+	}
+	files, _ := filepath.Glob(filepath.Join(s.teamKBDir("docs"), "*.json"))
 	for _, f := range files {
 		var d teamDoc
 		if b, err := os.ReadFile(f); err == nil && json.Unmarshal(b, &d) == nil && d.ID != "" {
@@ -81,6 +92,10 @@ func (s *storeServer) teamDoc(id string) (teamDoc, bool) {
 	if !kbIDRE.MatchString(id) {
 		return d, false
 	}
+	if s.repo != nil {
+		b, ok, err := s.repo.getKV("kb_team:docs", id)
+		return d, err == nil && ok && json.Unmarshal(b, &d) == nil
+	}
 	b, err := os.ReadFile(filepath.Join(s.teamKBDir("docs"), id+".json"))
 	return d, err == nil && json.Unmarshal(b, &d) == nil
 }
@@ -98,12 +113,30 @@ func (s *storeServer) saveTeamDoc(d teamDoc) (teamDoc, error) {
 		d.ID, d.Created = randomStoreToken(6), now
 	}
 	d.Size, d.Updated = len(d.Text), now
+	if s.repo != nil {
+		b, err := json.Marshal(d)
+		if err != nil {
+			return d, err
+		}
+		return d, s.repo.putKV("kb_team:docs", d.ID, d.Updated, b)
+	}
 	return d, writeJSONFile(filepath.Join(s.teamKBDir("docs"), d.ID+".json"), d)
 }
 
 func (s *storeServer) submissions() []kbSubmission {
-	files, _ := filepath.Glob(filepath.Join(s.teamKBDir("submissions"), "*.json"))
 	out := []kbSubmission{}
+	if s.repo != nil {
+		m, _ := s.repo.listKV("kb_team:submissions", 0)
+		for _, b := range m {
+			var x kbSubmission
+			if json.Unmarshal(b, &x) == nil && x.ID != "" {
+				out = append(out, x)
+			}
+		}
+		sort.Slice(out, func(a, b int) bool { return out[a].At > out[b].At })
+		return out
+	}
+	files, _ := filepath.Glob(filepath.Join(s.teamKBDir("submissions"), "*.json"))
 	for _, f := range files {
 		var x kbSubmission
 		if b, err := os.ReadFile(f); err == nil && json.Unmarshal(b, &x) == nil && x.ID != "" {
@@ -112,6 +145,30 @@ func (s *storeServer) submissions() []kbSubmission {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].At > out[b].At })
 	return out
+}
+
+func (s *storeServer) getSubmission(id string) (kbSubmission, bool) {
+	var x kbSubmission
+	if !kbIDRE.MatchString(id) {
+		return x, false
+	}
+	if s.repo != nil {
+		b, ok, err := s.repo.getKV("kb_team:submissions", id)
+		return x, err == nil && ok && json.Unmarshal(b, &x) == nil
+	}
+	b, err := os.ReadFile(filepath.Join(s.teamKBDir("submissions"), id+".json"))
+	return x, err == nil && json.Unmarshal(b, &x) == nil
+}
+
+func (s *storeServer) saveSubmission(x kbSubmission) error {
+	if s.repo != nil {
+		b, err := json.Marshal(x)
+		if err != nil {
+			return err
+		}
+		return s.repo.putKV("kb_team:submissions", x.ID, x.At, b)
+	}
+	return writeJSONFile(filepath.Join(s.teamKBDir("submissions"), x.ID+".json"), x)
 }
 
 func (s *storeServer) validTeam(id string) bool {
@@ -204,7 +261,7 @@ func (s *storeServer) handleTeamKB(w http.ResponseWriter, r *http.Request, sessi
 		}
 		in.ID, in.By, in.At, in.Status = randomStoreToken(6), me, time.Now().UTC().Format(time.RFC3339), "pending"
 		in.Reviewer, in.ReviewedAt, in.Note, in.Doc = "", "", "", ""
-		if err := writeJSONFile(filepath.Join(s.teamKBDir("submissions"), in.ID+".json"), in); err != nil {
+		if err := s.saveSubmission(in); err != nil {
 			s.fail(w, 500, "提交失败，请稍后重试")
 			return
 		}
@@ -219,13 +276,8 @@ func (s *storeServer) handleTeamKB(w http.ResponseWriter, r *http.Request, sessi
 			Note  string `json:"note"`
 		}
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, kbMaxBytes+8192)).Decode(&in)
-		path := filepath.Join(s.teamKBDir("submissions"), parts[1]+".json")
-		var x kbSubmission
-		if !kbIDRE.MatchString(parts[1]) {
-			s.fail(w, 404, "没有这份提交")
-			return
-		}
-		if b, err := os.ReadFile(path); err != nil || json.Unmarshal(b, &x) != nil {
+		x, okSub := s.getSubmission(parts[1])
+		if !okSub {
 			s.fail(w, 404, "没有这份提交")
 			return
 		}
@@ -258,7 +310,7 @@ func (s *storeServer) handleTeamKB(w http.ResponseWriter, r *http.Request, sessi
 			}
 			x.Status, x.Doc, x.Team = "approved", d.ID, in.Team
 		}
-		if err := writeJSONFile(path, x); err != nil {
+		if err := s.saveSubmission(x); err != nil {
 			s.fail(w, 500, "保存失败，请稍后重试")
 			return
 		}
@@ -306,7 +358,11 @@ func (s *storeServer) handleTeamKB(w http.ResponseWriter, r *http.Request, sessi
 			s.fail(w, 404, "没有这份资料")
 			return
 		}
-		_ = os.Remove(filepath.Join(s.teamKBDir("docs"), d.ID+".json"))
+		if s.repo != nil {
+			_ = s.repo.deleteKV("kb_team:docs", d.ID)
+		} else {
+			_ = os.Remove(filepath.Join(s.teamKBDir("docs"), d.ID+".json"))
+		}
 		s.auditReq(r, "kb-delete", me, d.Title)
 		s.writeJSON(w, 200, map[string]bool{"ok": true})
 	default:

@@ -247,7 +247,7 @@ func previewSharedPlatform(p *platform, a ansibleEnv, set, live fileSet) *previe
 	return r
 }
 func (p *platform) loadShared(cat *mwpack.Catalog) (*mwpack.Catalog, error) {
-	cs := &compStore{root: p.componentsDir, builtin: builtinFS()}
+	cs := &compStore{root: p.componentsDir, builtin: builtinFS(), repo: p.cfg.Repo}
 	set, _, err := cs.liveSet(sharedPlatformName)
 	if err != nil {
 		return nil, fmt.Errorf("公共流程读取失败：%w", err)

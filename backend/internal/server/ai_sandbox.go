@@ -191,9 +191,7 @@ var sandboxMu sync.Mutex
 
 func (s *storeServer) sandboxSettings() sandboxSettings {
 	st := sandboxSettings{Seconds: 120, MemoryMB: 2048, Procs: 64, OutputMB: 200, ExecPolicy: "auto", NetPolicy: "ask"}
-	if b, err := os.ReadFile(filepath.Join(s.settingsDir(), "sandbox.json")); err == nil {
-		_ = json.Unmarshal(b, &st)
-	}
+	_ = s.loadSettingDoc("sandbox_settings", filepath.Join(s.settingsDir(), "sandbox.json"), &st)
 	lim := sandboxLimits{Seconds: st.Seconds, MemoryMB: st.MemoryMB, Procs: st.Procs, OutputMB: st.OutputMB}.withDefaults()
 	st.Seconds, st.MemoryMB, st.Procs, st.OutputMB = lim.Seconds, lim.MemoryMB, lim.Procs, lim.OutputMB
 	st.ExecPolicy = normalizeExecPolicy(st.ExecPolicy)
@@ -208,7 +206,7 @@ func (s *storeServer) saveSandboxSettings(st sandboxSettings) error {
 	st.ExecPolicy = normalizeExecPolicy(st.ExecPolicy)
 	st.NetPolicy = normalizeNetPolicy(st.NetPolicy)
 	st.NetAllowDomains = normalizeNetAllowDomains(st.NetAllowDomains)
-	return writeJSONFile(filepath.Join(s.settingsDir(), "sandbox.json"), st)
+	return s.saveSettingDoc("sandbox_settings", filepath.Join(s.settingsDir(), "sandbox.json"), st)
 }
 
 func (st sandboxSettings) limits() sandboxLimits {

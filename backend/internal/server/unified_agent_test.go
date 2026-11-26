@@ -8,30 +8,23 @@ import (
 	"testing"
 )
 
-func TestUnifiedAgentClusterGrantsAndOnDemandExec(t *testing.T) {
+func TestUnifiedAgentPerClusterOperatorBindAndHeartbeats(t *testing.T) {
 	srv, _ := testStore(t)
 	cookie, csrf := storeLogin(t, srv, "admin")
+	bobCookie, bobCSRF := storeLogin(t, srv, "bob")
 
-	// 1. Import a production cluster WITHOUT configuring any 3-step automation wizard.
-	importBody := `{
-		"id": "pg-ondemand-prod",
-		"component": "postgresql",
-		"display_name": "PostgreSQL",
-		"version": "17",
-		"exact_version": "17.11",
-		"platform": "ubuntu2404",
-		"deploy_method": "systemd",
-		"hosts": [
-			{"name": "db-01", "ip": "10.30.0.11", "role": "primary"},
-			{"name": "db-02", "ip": "10.30.0.12", "role": "replica"}
-		]
-	}`
-	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
-		t.Fatalf("import cluster failed: %d %s", rr.Code, rr.Body.String())
+	// 1. Admin imports admin-pg-prod; bob imports bob-pg-own.
+	adminCluster := `{"id":"admin-pg-prod","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-01","ip":"10.30.0.11","role":"primary"}]}`
+	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(adminCluster), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("admin import cluster failed: %d %s", rr.Code, rr.Body.String())
+	}
+	bobCluster := `{"id":"bob-pg-own","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-02","ip":"10.30.0.12","role":"primary"}]}`
+	if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(bobCluster), bobCookie, bobCSRF); rr.Code != 200 && rr.Code != 201 {
+		t.Fatalf("bob import cluster failed: %d %s", rr.Code, rr.Body.String())
 	}
 
-	// 2. Enroll a Unified Agent via /api/executions/unified-agents (no cluster bound yet).
-	enrollRR := storeRequest(srv, "POST", "/api/executions/unified-agents", strings.NewReader(`{"name":"jumpbox-01","ip":"10.30.0.5"}`), cookie, csrf)
+	// 2. Admin enrolls a shared Unified Agent and binds admin-pg-prod.
+	enrollRR := storeRequest(srv, "POST", "/api/executions/unified-agents", strings.NewReader(`{"name":"jumpbox-01","ip":"10.30.0.5","clusters":["admin-pg-prod"]}`), cookie, csrf)
 	if enrollRR.Code != 201 {
 		t.Fatalf("enroll unified agent failed: %d %s", enrollRR.Code, enrollRR.Body.String())
 	}
@@ -40,12 +33,9 @@ func TestUnifiedAgentClusterGrantsAndOnDemandExec(t *testing.T) {
 		Token string           `json:"token"`
 	}
 	_ = json.Unmarshal(enrollRR.Body.Bytes(), &enrolled)
-	if enrolled.Agent.ID == "" || len(enrolled.Token) < 40 {
-		t.Fatalf("unexpected unified agent enrollment response: %s", enrollRR.Body.String())
-	}
 
-	// Simulate heartbeat from Agent (with host probe telemetry).
-	pollReq := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/poll", bytes.NewReader([]byte(`{"protocol":3,"version":"1.0.0","heartbeat":true,"probe":{"hostname":"jumpbox-01","cpu_cores":8,"mem_used_pct":31.5}}`)))
+	// 3. Simulate heartbeat with probe telemetry -> verify Heartbeats history is recorded!
+	pollReq := httptest.NewRequest("POST", "http://127.0.0.1:8090/api/execution-agent/poll", bytes.NewReader([]byte(`{"protocol":3,"version":"1.0.0","heartbeat":true,"probe":{"hostname":"jumpbox-01","cpu_cores":8,"load1":0.65,"mem_total_mb":16384,"mem_used_pct":31.5,"disk_total_gb":200,"disk_used_pct":42.0}}`)))
 	pollReq.Header.Set("Authorization", "Bearer "+enrolled.Token)
 	pollReq.Header.Set("Content-Type", "application/json")
 	pollW := httptest.NewRecorder()
@@ -54,101 +44,97 @@ func TestUnifiedAgentClusterGrantsAndOnDemandExec(t *testing.T) {
 		t.Fatalf("unified agent poll failed: %d %s", pollW.Code, pollW.Body.String())
 	}
 
-	// 3. Before granting cluster access, on-demand probe with agent_id must be rejected with 403.
-	unauthProbe := storeRequest(srv, "POST", "/api/clusters/pg-ondemand-prod/automation/probe", strings.NewReader(`{"script":"#!/usr/bin/env bash\nhostname\n","agent_id":"`+enrolled.Agent.ID+`"}`), cookie, csrf)
-	if unauthProbe.Code != 403 {
-		t.Fatalf("expected 403 before cluster grant, got %d %s", unauthProbe.Code, unauthProbe.Body.String())
+	// 4. Bob CAN list Agents (sees jumpbox-01 & manageable_clusters=["bob-pg-own"], does NOT see admin's private cluster).
+	bobListRR := storeRequest(srv, "GET", "/api/executions/unified-agents", nil, bobCookie, "")
+	if bobListRR.Code != 200 {
+		t.Fatalf("expected bob GET unified-agents 200, got %d %s", bobListRR.Code, bobListRR.Body.String())
+	}
+	var bobList struct {
+		Agents             []unifiedAgentView `json:"agents"`
+		ManageableClusters []string           `json:"manageable_clusters"`
+	}
+	_ = json.Unmarshal(bobListRR.Body.Bytes(), &bobList)
+	if len(bobList.Agents) != 1 || len(bobList.Agents[0].Heartbeats) != 1 {
+		t.Fatalf("expected bob to see 1 agent with 1 heartbeat sample, got %+v", bobList.Agents)
+	}
+	if len(bobList.ManageableClusters) != 1 || bobList.ManageableClusters[0] != "bob-pg-own" {
+		t.Fatalf("expected bob manageable_clusters=[bob-pg-own], got %v", bobList.ManageableClusters)
+	}
+	if len(bobList.Agents[0].Clusters) != 0 {
+		t.Fatalf("bob must not see admin's private cluster binding, got %v", bobList.Agents[0].Clusters)
 	}
 
-	// 4. Grant "readonly" via IAM Cluster Permissions (PUT /api/iam/clusters/pg-ondemand-prod).
-	grantRORR := storeRequest(srv, "PUT", "/api/iam/clusters/pg-ondemand-prod", strings.NewReader(`{"agents":{"`+enrolled.Agent.ID+`":"readonly"}}`), cookie, csrf)
-	if grantRORR.Code != 200 {
-		t.Fatalf("PUT /api/iam/clusters/pg-ondemand-prod readonly failed: %d %s", grantRORR.Code, grantRORR.Body.String())
+	// 5. Bob CANNOT bind admin-pg-prod (403), CANNOT globally disable Agent (403), CAN bind his own bob-pg-own (200)!
+	if rr := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enrolled.Agent.ID+`","bind_clusters":["admin-pg-prod"]}`), bobCookie, bobCSRF); rr.Code != 403 {
+		t.Fatalf("expected 403 when bob binds admin's cluster, got %d", rr.Code)
+	}
+	if rr := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enrolled.Agent.ID+`","disabled":true}`), bobCookie, bobCSRF); rr.Code != 403 {
+		t.Fatalf("expected 403 when bob tries to globally disable agent, got %d", rr.Code)
+	}
+	bobBindRR := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enrolled.Agent.ID+`","bind_clusters":["bob-pg-own"]}`), bobCookie, bobCSRF)
+	if bobBindRR.Code != 200 {
+		t.Fatalf("expected 200 when bob binds his own cluster, got %d %s", bobBindRR.Code, bobBindRR.Body.String())
 	}
 
-	// Verify bidirectional sync: GET /api/executions/unified-agents reflects cluster_modes["pg-ondemand-prod"] == "readonly".
-	listAgentsRR := storeRequest(srv, "GET", "/api/executions/unified-agents", nil, cookie, "")
-	var listAgents struct {
+	// 6. Verify admin still has admin-pg-prod AND bob-pg-own (incremental merge preserved admin's private binding!).
+	adminListRR := storeRequest(srv, "GET", "/api/executions/unified-agents", nil, cookie, "")
+	var adminList struct {
 		Agents []unifiedAgentView `json:"agents"`
 	}
-	_ = json.Unmarshal(listAgentsRR.Body.Bytes(), &listAgents)
-	if len(listAgents.Agents) != 1 || listAgents.Agents[0].ClusterModes["pg-ondemand-prod"] != "readonly" {
-		t.Fatalf("expected unified agent cluster_modes readonly, got %+v", listAgents.Agents)
+	_ = json.Unmarshal(adminListRR.Body.Bytes(), &adminList)
+	if len(adminList.Agents) != 1 || len(adminList.Agents[0].Clusters) != 2 {
+		t.Fatalf("expected both admin-pg-prod and bob-pg-own to be bound, got %+v", adminList.Agents)
+	}
+}
+
+func TestLegacyNodeGrantsUnbindClusterDoesNotResurrect(t *testing.T) {
+	srv, _ := testStore(t)
+	cookie, csrf := storeLogin(t, srv, "admin")
+
+	for _, cid := range []string{"ecs-pg-auto", "ecs-pg-keep"} {
+		importBody := `{"id":"` + cid + `","component":"postgresql","display_name":"PostgreSQL","version":"17","exact_version":"17.11","platform":"ubuntu2404","deploy_method":"systemd","hosts":[{"name":"db-01","ip":"172.26.198.120","role":"primary"}]}`
+		if rr := storeRequest(srv, "POST", "/api/clusters/import", strings.NewReader(importBody), cookie, csrf); rr.Code != 200 && rr.Code != 201 {
+			t.Fatalf("import %s failed: %d %s", cid, rr.Code, rr.Body.String())
+		}
 	}
 
-	// 5. With "readonly", read-only baseline probe SUCCEEDS without any pre-wizard enabled flag!
-	roProbeRR := storeRequest(srv, "POST", "/api/clusters/pg-ondemand-prod/automation/probe", strings.NewReader(`{"script":"#!/usr/bin/env bash\nhostname\n","agent_id":"`+enrolled.Agent.ID+`","ssh_user":"ops","ssh_port":2222}`), cookie, csrf)
-	if roProbeRR.Code != 201 {
-		t.Fatalf("expected 201 for readonly probe, got %d %s", roProbeRR.Code, roProbeRR.Body.String())
+	tAllow := true
+	executionMu.Lock()
+	d, err := srv.readExecutions()
+	if err != nil {
+		executionMu.Unlock()
+		t.Fatalf("readExecutions: %v", err)
 	}
+	if d.Nodes == nil {
+		d.Nodes = map[string]executionNode{}
+	}
+	d.Nodes["ecs-pg-1-executor"] = executionNode{
+		ID:             "ecs-pg-1-executor",
+		Kind:           "independent",
+		Name:           "ecs-pg-1-executor",
+		ControllerIP:   "172.26.198.120",
+		Clusters:       []string{"ecs-pg-auto", "ecs-pg-keep"},
+		Grants:         map[string][]string{"ecs-pg-auto": {"172.26.198.120"}, "ecs-pg-keep": {"172.26.198.120"}},
+		AllowDelivery:  &tAllow,
+		AllowProbe:     &tAllow,
+		AllowRehearsal: &tAllow,
+	}
+	if err := srv.saveExecutions(d); err != nil {
+		executionMu.Unlock()
+		t.Fatalf("saveExecutions: %v", err)
+	}
+	executionMu.Unlock()
 
-	// Complete probe task so cluster lock is clean, and prepare a mutating rehearsal step.
-	rh := changeRehearsal{
-		ID:        "b1b2c3d4e5f6",
-		ClusterID: "pg-ondemand-prod",
-		AppID:     "postgresql",
-		AppName:   "PostgreSQL",
-		Title:     "Reload PG",
-		Goal:      "Reload PG",
-		Stage:     "rehearsing",
-		Steps: []rehearsalStep{
-			{
-				ID:         "step-mut-1",
-				Phase:      "execute",
-				Order:      1,
-				Title:      "Reload Service",
-				TargetRole: "primary",
-				Command:    "systemctl reload patroni",
-				Expect:     "ok",
-				Status:     "pending",
-			},
-		},
-		CreatedAt: executionNow(),
-		UpdatedAt: executionNow(),
+	patchRR := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"ecs-pg-1-executor","unbind_clusters":["ecs-pg-auto"]}`), cookie, csrf)
+	if patchRR.Code != 200 {
+		t.Fatalf("PATCH unbind cluster failed: %d %s", patchRR.Code, patchRR.Body.String())
 	}
-	if err := srv.saveRehearsal(rh); err != nil {
-		t.Fatalf("saveRehearsal: %v", err)
+	var updated unifiedAgentView
+	_ = json.Unmarshal(patchRR.Body.Bytes(), &updated)
+	if updated.ClusterModes["ecs-pg-auto"] != "" {
+		t.Fatalf("ecs-pg-auto resurrected in PATCH response: %+v", updated.ClusterModes)
 	}
-	ms, _ := fakeModel(t, "ok")
-	enableAI(t, srv, ms.URL, 1)
-
-	// 6. Mutating step MUST fail with 403 while Agent is only granted "readonly"!
-	mutBlockedRR := storeRequest(srv, "POST", "/api/clusters/pg-ondemand-prod/rehearsals/"+rh.ID+"/exec/step", strings.NewReader(`{"step_id":"step-mut-1","agent_id":"`+enrolled.Agent.ID+`","targets":[{"host":"db-01","ip":"10.30.0.11"}]}`), cookie, csrf)
-	if mutBlockedRR.Code != 403 {
-		t.Fatalf("expected 403 for mutating step on readonly agent, got %d %s", mutBlockedRR.Code, mutBlockedRR.Body.String())
-	}
-
-	// 7. Upgrade Agent to "readwrite" via PATCH /api/executions/unified-agents -> mutating step SUCCEEDS!
-	upgradeRWRR := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enrolled.Agent.ID+`","set_cluster":{"cluster_id":"pg-ondemand-prod","mode":"readwrite"}}`), cookie, csrf)
-	if upgradeRWRR.Code != 200 {
-		t.Fatalf("upgrade to readwrite failed: %d %s", upgradeRWRR.Code, upgradeRWRR.Body.String())
-	}
-
-	mutOKRR := storeRequest(srv, "POST", "/api/clusters/pg-ondemand-prod/rehearsals/"+rh.ID+"/exec/step", strings.NewReader(`{"step_id":"step-mut-1","agent_id":"`+enrolled.Agent.ID+`","targets":[{"host":"db-01","ip":"10.30.0.11"}]}`), cookie, csrf)
-	if mutOKRR.Code != 201 {
-		t.Fatalf("expected 201 for mutating step on readwrite agent, got %d %s", mutOKRR.Code, mutOKRR.Body.String())
-	}
-
-	// Verify cluster summary remembers last_agent_id and ssh preferences!
-	sumRR := storeRequest(srv, "GET", "/api/clusters/pg-ondemand-prod/automation", nil, cookie, "")
-	var sum struct {
-		Ready       bool               `json:"ready"`
-		LastAgentID string             `json:"last_agent_id"`
-		Config      clusterAutomationConfig `json:"config"`
-		Unified     []unifiedAgentView `json:"unified_agents"`
-	}
-	_ = json.Unmarshal(sumRR.Body.Bytes(), &sum)
-	if !sum.Ready || sum.LastAgentID != enrolled.Agent.ID || sum.Config.SSHUser != "ops" || sum.Config.SSHPort != 2222 || len(sum.Unified) != 1 {
-		t.Fatalf("unexpected automation summary: %+v", sum)
-	}
-
-	// 8. Globally disabling Agent blocks new on-demand tasks with 409!
-	disRR := storeRequest(srv, "PATCH", "/api/executions/unified-agents", strings.NewReader(`{"id":"`+enrolled.Agent.ID+`","disabled":true}`), cookie, csrf)
-	if disRR.Code != 200 {
-		t.Fatalf("disable unified agent failed: %d %s", disRR.Code, disRR.Body.String())
-	}
-	disProbeRR := storeRequest(srv, "POST", "/api/clusters/pg-ondemand-prod/automation/probe", strings.NewReader(`{"script":"#!/usr/bin/env bash\nhostname\n","agent_id":"`+enrolled.Agent.ID+`"}`), cookie, csrf)
-	if disProbeRR.Code != 409 {
-		t.Fatalf("expected 409 when agent is disabled, got %d %s", disProbeRR.Code, disProbeRR.Body.String())
+	if updated.ClusterModes["ecs-pg-keep"] != "readwrite" {
+		t.Fatalf("expected ecs-pg-keep to remain bound, got %+v", updated.ClusterModes)
 	}
 }

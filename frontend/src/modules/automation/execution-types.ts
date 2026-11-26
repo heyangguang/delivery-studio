@@ -65,6 +65,13 @@ export type ClusterAutomationHost = {
 
 export type AgentClusterMode = "readonly" | "readwrite";
 
+export type AgentHeartbeatSample = {
+  at: string;
+  load1?: number;
+  mem_pct?: number;
+  disk_pct?: number;
+};
+
 export type UnifiedAgentView = {
   id: string;
   backing: "node" | "direct";
@@ -81,6 +88,7 @@ export type UnifiedAgentView = {
   clusters: string[];
   suggested_clusters?: string[];
   probe?: AgentHostProbe;
+  heartbeats?: AgentHeartbeatSample[];
   service_name?: string;
 };
 

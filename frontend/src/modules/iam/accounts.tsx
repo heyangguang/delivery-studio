@@ -63,6 +63,7 @@ import {
 } from "./iam";
 import type { ClusterAccessLevel, IAM } from "./iam";
 import { bi, getLang, useLang } from "../../app/i18n";
+import "../settings/settings.css";
 
 export const roleName = (r: string) =>
   r === "admin" ? bi("管理员", "Admin") : bi("交付成员", "Member");
@@ -216,7 +217,7 @@ export function AccountsPage({
 
   useEffect(() => {
     if (!can("iam.user") && !selected) {
-      const target = can("iam.team|execution.manage")
+      const target = can("iam.team")
         ? "~clusters"
         : can("iam.role")
           ? "~roles"
@@ -226,7 +227,7 @@ export function AccountsPage({
   }, [selected]);
 
   const hasIAMAccess =
-    me.role === "admin" || can("iam.user|iam.role|iam.team|audit.view|execution.manage");
+    me.role === "admin" || can("iam.user|iam.role|iam.team|audit.view");
 
   const adding = selected === "+new";
   const rolesView = selected === "~roles";
@@ -259,6 +260,7 @@ export function AccountsPage({
       routeId?: string;
       icon: React.ReactNode;
       title: string;
+      hint: string;
       count?: number;
     }[] = [];
     if (can("iam.user")) {
@@ -267,15 +269,22 @@ export function AccountsPage({
         routeId: undefined,
         icon: AccIcons.users,
         title: bi("用户账户", "Users"),
+        hint: users.length
+          ? bi(`${users.length} 位成员 · 角色与范围`, `${users.length} members & access`)
+          : bi("成员账户与角色分配", "Accounts & roles"),
         count: users.length || undefined,
       });
     }
     if (can("iam.user|iam.role|iam.team")) {
+      const tCnt = iam?.teams.length || 0;
       orgItems.push({
         id: "~teams",
         routeId: "~teams",
         icon: AccIcons.teams,
         title: bi("协作团队", "Teams"),
+        hint: tCnt
+          ? bi(`${tCnt} 个团队 · 批量共享集群`, `${tCnt} teams · shared access`)
+          : bi("还没有团队 · 按组共享集群", "Share clusters by team"),
         count: iam?.teams.length,
       });
     }
@@ -285,26 +294,33 @@ export function AccountsPage({
         routeId: "~deleted",
         icon: AccIcons.deleted,
         title: bi("已归档账户", "Archived"),
+        hint: bi(`${iam.deleted.length} 个历史归档账户`, `${iam.deleted.length} archived`),
         count: iam.deleted.length,
       });
     }
 
     const accessItems: typeof orgItems = [];
-    if (can("iam.user|iam.team|execution.manage")) {
+    if (can("iam.user|iam.team")) {
+      const cCnt = iam?.clusters?.length || 0;
       accessItems.push({
         id: "~clusters",
         routeId: "~clusters",
         icon: AccIcons.clusters,
         title: bi("集群权限", "Cluster Access"),
+        hint: cCnt
+          ? bi(`${cCnt} 个集群 · 按集群分配成员`, `${cCnt} clusters · assign members`)
+          : bi("按集群分配协作成员与团队", "Per-cluster member grants"),
         count: iam?.clusters?.length,
       });
     }
     if (can("iam.user|iam.role|iam.team")) {
+      const rCnt = iam?.roles.length || 4;
       accessItems.push({
         id: "~roles",
         routeId: "~roles",
         icon: AccIcons.roles,
         title: bi("角色权限", "Roles"),
+        hint: bi(`${rCnt} 个角色 · 每个能做什么`, `${rCnt} roles · permissions & scope`),
         count: iam?.roles.length,
       });
     }
@@ -314,6 +330,7 @@ export function AccountsPage({
         routeId: "~audit",
         icon: AccIcons.audit,
         title: bi("操作审计", "Audit Log"),
+        hint: bi("谁、何时、对什么、做了什么", "Who did what and when"),
       });
     }
 
@@ -356,9 +373,9 @@ export function AccountsPage({
   };
 
   return (
-    <div className="iam-shell">
+    <div className="st-page">
       {narrow ? (
-        <div className="iam-mobile-bar">
+        <div className="st-mobile-bar iam-mobile-bar">
           <UnderlineTabs
             className="iam-mobile-tabs"
             label="IAM"
@@ -373,41 +390,35 @@ export function AccountsPage({
           />
         </div>
       ) : (
-        <aside className="iam-rail" aria-label="IAM">
-          <div className="iam-rail-head">
-            <h1>IAM</h1>
-            <span>{bi("身份与访问控制", "Identity & Access")}</span>
-          </div>
-
-          <nav className="iam-rail-nav" aria-label={bi("IAM 导航", "IAM navigation")}>
-            {navGroups.map((grp) => (
-              <div key={grp.id} className="iam-rail-grp">
-                <div className="iam-rail-grp-label">{grp.label}</div>
-                {grp.items.map((item) => {
-                  const on = activeNavKey === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`iam-nav-item ${on ? "on" : ""}`}
-                      aria-current={on ? "page" : undefined}
-                      onClick={() => switchSection(item.id)}
-                    >
-                      <span className="iam-nav-ic">{item.icon}</span>
-                      <span className="iam-nav-lbl">{item.title}</span>
-                      {item.count !== undefined && (
-                        <em className="iam-nav-cnt num">{item.count}</em>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </nav>
+        <aside className="st-nav" aria-label="IAM">
+          <h1>IAM</h1>
+          {navGroups.map((grp) => (
+            <div key={grp.id} className="st-nav-grp">
+              <div className="st-nav-g">{grp.label}</div>
+              {grp.items.map((item) => {
+                const on = activeNavKey === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`sx-nav-i ${on ? "on" : ""}`}
+                    aria-current={on ? "page" : undefined}
+                    onClick={() => switchSection(item.id)}
+                  >
+                    <span className="sx-nav-ic">{item.icon}</span>
+                    <span className="sx-nav-t">
+                      <b>{item.title}</b>
+                      <small>{item.hint}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </aside>
       )}
 
-      <main className="iam-canvas">
+      <main className="st-body iam-canvas">
         {conn !== "online" && !auditView && (
           <div className="iam-conn-banner">
             <Alert
@@ -986,7 +997,7 @@ function UsersDirectory({
       )}
 
       <Drawer
-        width={620}
+        width={760}
         style={{ maxWidth: "100vw" }}
         visible={Boolean(quickUserObj && iam)}
         onCancel={() => setQuickGrantUser("")}

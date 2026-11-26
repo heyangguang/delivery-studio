@@ -654,18 +654,20 @@ export function ClusterDetail({
             <div className="detail-meta">
               {owner && <span className="row-owner">{bi(`${owner} 的集群`, `${owner}'s cluster`)}</span>}
               {readOnly && (
-                <Tooltip
-                  content={bi(
-                    "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
-                    "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
-                  )}
-                  mini
-                >
-                  <span className="cl-ro-chip">
-                    <IconLock />
-                    <span>{bi("只读授权", "Read-only")}</span>
-                  </span>
-                </Tooltip>
+                <span>
+                  <Tooltip
+                    content={bi(
+                      "你对该集群拥有只读查看权限，可浏览配置、文档与演练记录，不可执行变更或删除",
+                      "You have read-only access to this cluster; viewing and exports are allowed, mutations are restricted",
+                    )}
+                    mini
+                  >
+                    <span className="cl-ro-chip">
+                      <IconLock />
+                      <span>{bi("只读授权", "Read-only")}</span>
+                    </span>
+                  </Tooltip>
+                </span>
               )}
               <span>
                 {c.app_name} {c.version}
@@ -869,6 +871,7 @@ export function ClusterDetail({
             <React.Suspense fallback={<Skeleton animation text={{ rows: 6 }} />}>
               <LazyClusterAutomationPanel
                 clusterId={c.id}
+                readOnly={readOnly}
                 onChanged={setAutoSummary}
               />
             </React.Suspense>

@@ -56,8 +56,9 @@ type executionNode struct {
 	AllowDelivery  *bool               `json:"allow_delivery,omitempty"`
 	AllowProbe     *bool               `json:"allow_probe,omitempty"`
 	AllowRehearsal *bool               `json:"allow_rehearsal,omitempty"`
-	ClusterModes   map[string]string   `json:"cluster_modes,omitempty"`
-	Probe          *agentHostProbe     `json:"probe,omitempty"`
+	ClusterModes   map[string]string      `json:"cluster_modes,omitempty"`
+	Probe          *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats     []agentHeartbeatSample `json:"heartbeats,omitempty"`
 }
 type executionStep struct {
 	ID        string         `json:"id"`
@@ -1537,7 +1538,11 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		if p := sanitizeAgentHostProbe(req.Probe); p != nil {
 			n.Probe = p
 		}
+		n.Heartbeats = appendAgentHeartbeat(n.Heartbeats, n.LastSeen, n.Probe)
 		d.Nodes[n.ID] = n
+		if req.Heartbeat {
+			_ = s.saveExecutions(d)
+		}
 		if !n.Disabled && !req.Heartbeat && n.Protocol >= 2 {
 			if p := pendingExecutionPreparation(d, n); p != nil {
 				p.Snapshot, e = s.preparationSnapshot(*p)

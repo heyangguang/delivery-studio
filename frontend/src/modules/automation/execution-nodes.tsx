@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
+  Checkbox,
   Drawer,
   Input,
   Message,
   Modal,
   Popconfirm,
-  Popover,
   Select,
   Skeleton,
   Switch,
@@ -14,8 +14,10 @@ import {
 } from "@arco-design/web-react";
 import {
   IconArrowLeft,
+  IconArrowRight,
   IconBook,
   IconCheckCircle,
+  IconClose,
   IconCopy,
   IconDelete,
   IconDownload,
@@ -25,7 +27,6 @@ import {
   IconRefresh,
   IconRight,
   IconSearch,
-  IconStorage,
   IconThunderbolt,
 } from "@arco-design/web-react/icon";
 import {
@@ -45,9 +46,8 @@ import {
 import { go } from "../../app/router";
 import { Kbd, StatusBadge } from "../../design/ui";
 import { bi, useLang, withLang } from "../../app/i18n";
-import { invalidateIAMCache } from "../iam/iam";
 import {
-  AgentClusterMode,
+  AgentHeartbeatSample,
   AgentHostProbe,
   AutomationBootstrapInfo,
   UnifiedAgentView,
@@ -61,6 +61,7 @@ type StatusFilter = "all" | "online" | "offline" | "disabled";
 
 type UnifiedAgentsResponse = {
   agents: UnifiedAgentView[];
+  manageable_clusters?: string[];
   bootstrap: AutomationBootstrapInfo;
 };
 
@@ -68,6 +69,13 @@ type UnifiedEnrollment = {
   agent: UnifiedAgentView;
   token: string;
   bootstrap: AutomationBootstrapInfo;
+};
+
+type HeartbeatSlot = {
+  key: string;
+  label: string;
+  tone: "ok" | "warn" | "miss" | "idle";
+  sample?: AgentHeartbeatSample;
 };
 
 const isLoopbackURL = (raw: string): boolean => {
@@ -99,6 +107,101 @@ function fmtUptime(sec?: number): string {
   return bi(`${Math.max(1, m)}分钟`, `${Math.max(1, m)}m`);
 }
 
+function toLocalMinuteKey(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
+function buildHeartbeatSlots(agent: UnifiedAgentView, count = 60): {
+  slots: HeartbeatSlot[];
+  uptimePct: number | null;
+  activeSlots: number;
+} {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  const byMinute = new Map<string, AgentHeartbeatSample>();
+  let earliestMs = Infinity;
+
+  for (const s of agent.heartbeats || []) {
+    const t = new Date(s.at);
+    if (Number.isNaN(t.getTime())) continue;
+    if (t.getTime() < earliestMs) earliestMs = t.getTime();
+    byMinute.set(toLocalMinuteKey(t), s);
+  }
+
+  if (agent.last_seen) {
+    const lt = new Date(agent.last_seen);
+    if (!Number.isNaN(lt.getTime())) {
+      if (lt.getTime() < earliestMs) earliestMs = lt.getTime();
+      const lk = toLocalMinuteKey(lt);
+      if (!byMinute.has(lk)) {
+        byMinute.set(lk, {
+          at: agent.last_seen,
+          load1: agent.probe?.load1,
+          mem_pct: agent.probe?.mem_used_pct,
+          disk_pct: agent.probe?.disk_used_pct,
+        });
+      }
+    }
+  }
+
+  if (agent.online && !agent.disabled) {
+    const curKey = toLocalMinuteKey(now);
+    if (!byMinute.has(curKey)) {
+      byMinute.set(curKey, {
+        at: new Date().toISOString(),
+        load1: agent.probe?.load1,
+        mem_pct: agent.probe?.mem_used_pct,
+        disk_pct: agent.probe?.disk_used_pct,
+      });
+      if (now.getTime() < earliestMs) earliestMs = now.getTime();
+    }
+  }
+
+  const slots: HeartbeatSlot[] = [];
+  let okOrWarn = 0;
+  let monitored = 0;
+
+  for (let i = count - 1; i >= 0; i--) {
+    const slotDate = new Date(now.getTime() - i * 60_000);
+    const key = toLocalMinuteKey(slotDate);
+    const hhmm = key.slice(11);
+    const sample = byMinute.get(key);
+    if (sample) {
+      monitored++;
+      okOrWarn++;
+      const highLoad =
+        (sample.mem_pct !== undefined && sample.mem_pct >= 85) ||
+        (sample.disk_pct !== undefined && sample.disk_pct >= 90);
+      slots.push({
+        key,
+        label: hhmm,
+        tone: highLoad ? "warn" : "ok",
+        sample,
+      });
+    } else if (earliestMs !== Infinity && slotDate.getTime() >= earliestMs - 30_000) {
+      monitored++;
+      slots.push({
+        key,
+        label: hhmm,
+        tone: "miss",
+      });
+    } else {
+      slots.push({
+        key,
+        label: hhmm,
+        tone: "idle",
+      });
+    }
+  }
+
+  const uptimePct =
+    monitored > 0 ? Math.round((okOrWarn / monitored) * 1000) / 10 : null;
+  return { slots, uptimePct, activeSlots: okOrWarn };
+}
+
 function CommandBlock({ title, code }: { title: string; code: string }) {
   useLang();
   return (
@@ -119,59 +222,6 @@ function CommandBlock({ title, code }: { title: string; code: string }) {
   );
 }
 
-/** Apple-style gliding 3-state switch for Agent per-cluster authorization: Disabled / Read-only / Read-write */
-export function AgentModeSwitch({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: "" | AgentClusterMode;
-  disabled?: boolean;
-  onChange: (next: "" | AgentClusterMode) => void;
-}) {
-  useLang();
-  const idx = value === "readwrite" ? 2 : value === "readonly" ? 1 : 0;
-  return (
-    <span
-      className={`iam-tri-switch ${disabled ? "is-disabled" : ""} idx-${idx}`}
-      style={{ "--tri-idx": idx } as React.CSSProperties}
-      role="radiogroup"
-      aria-label={bi("Agent 集群权限", "Agent cluster permission")}
-    >
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === ""}
-        disabled={disabled}
-        className={value === "" ? "on is-none" : ""}
-        onClick={() => onChange("")}
-      >
-        {bi("禁用", "Off")}
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === "readonly"}
-        disabled={disabled}
-        className={value === "readonly" ? "on is-view" : ""}
-        onClick={() => onChange("readonly")}
-      >
-        {bi("只读", "RO")}
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={value === "readwrite"}
-        disabled={disabled}
-        className={value === "readwrite" ? "on is-op" : ""}
-        onClick={() => onChange("readwrite")}
-      >
-        {bi("读写", "RW")}
-      </button>
-    </span>
-  );
-}
-
 function hasProbeMetrics(probe?: AgentHostProbe): boolean {
   if (!probe) return false;
   return Boolean(
@@ -183,112 +233,850 @@ function hasProbeMetrics(probe?: AgentHostProbe): boolean {
   );
 }
 
-function ProbeTelemetrySection({
-  probe,
-  online,
-  disabled,
-  lastSeen,
+/** Interactive 60-minute Status Bar Strip (Porcelain/Obsidian Apple-grade edition) */
+function HeartbeatPulseBars({
+  agent,
+  onOpenDetail,
 }: {
-  probe?: AgentHostProbe;
-  online: boolean;
-  disabled: boolean;
-  lastSeen?: string;
+  agent: UnifiedAgentView;
+  onOpenDetail?: () => void;
 }) {
   useLang();
-  if (!hasProbeMetrics(probe)) {
-    return (
-      <div className="ua-probe-inline-note">
-        <span
-          className={`ec-state-dot ${
-            disabled
-              ? "is-disabled"
-              : online
-                ? "is-online"
-                : lastSeen
-                  ? "is-offline"
-                  : "is-waiting"
-          }`}
-        />
-        <span>
-          {disabled
-            ? bi(
-                "该 Agent 当前已禁用；重新启用并保持在线后将实时展示主机 CPU、内存与磁盘状态。",
-                "Agent is disabled. Re-enable to view live host CPU, memory, and disk telemetry.",
-              )
-            : lastSeen
-              ? bi(
-                  "当前未在线，恢复心跳连接后将每 15 秒自动同步主机 CPU、内存、磁盘与系统内核信息。",
-                  "Agent is offline. Host CPU, memory, disk, and OS telemetry sync automatically once reconnected.",
-                )
-              : bi(
-                  "尚未收到首次心跳；在目标机器执行安装命令后将自动上报实时主机指标。",
-                  "Waiting for first heartbeat after running the install command on the machine.",
-                )}
-        </span>
-      </div>
-    );
-  }
+  const { slots, uptimePct } = useMemo(
+    () => buildHeartbeatSlots(agent, 60),
+    [agent],
+  );
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const hovered = hoverIdx !== null ? slots[hoverIdx] : null;
 
-  const memPct = Math.min(100, Math.max(0, probe?.mem_used_pct ?? 0));
-  const diskPct = Math.min(100, Math.max(0, probe?.disk_used_pct ?? 0));
-  const memTotalGB = probe?.mem_total_mb ? (probe.mem_total_mb / 1024).toFixed(1) : "";
-  const barTone = (pct: number) =>
-    pct >= 90 ? "is-bad" : pct >= 75 ? "is-warn" : "";
+  const hoverSummary = hovered
+    ? hovered.tone === "ok" || hovered.tone === "warn"
+      ? `${hovered.label} · ${
+          hovered.tone === "warn"
+            ? bi("高负载告警", "High Load")
+            : bi("心跳正常", "Healthy")
+        }${
+          hovered.sample?.load1 !== undefined
+            ? ` · Load ${hovered.sample.load1.toFixed(2)}`
+            : ""
+        }${
+          hovered.sample?.mem_pct !== undefined
+            ? ` · ${bi("内存", "Mem")} ${hovered.sample.mem_pct.toFixed(1)}%`
+            : ""
+        }${
+          hovered.sample?.disk_pct !== undefined
+            ? ` · ${bi("磁盘", "Disk")} ${hovered.sample.disk_pct.toFixed(1)}%`
+            : ""
+        }`
+      : hovered.tone === "miss"
+        ? `${hovered.label} · ${bi("未收到心跳（离线中断）", "Missed heartbeat (offline)")}`
+        : `${hovered.label} · ${bi("无上报记录", "No record")}`
+    : null;
 
   return (
-    <div className="ec-surface-card">
-      <div className="ec-probe-grid">
-        <div className="ec-probe-item">
-          <span className="ec-probe-lbl">{bi("主机与系统", "Host & OS")}</span>
-          <div className="ec-probe-val">
-            <b>{probe?.hostname || "—"}</b>
-          </div>
-          <span className="ec-probe-sub">
-            {[probe?.os, probe?.kernel].filter(Boolean).join(" · ") || "—"}
-          </span>
+    <div className="ua-pulse-box">
+      <div className="ua-pulse-top">
+        <div className="ua-pulse-title">
+          <span
+            className={`ec-state-dot ${
+              agent.disabled
+                ? "is-disabled"
+                : agent.online
+                  ? "is-online"
+                  : agent.last_seen
+                    ? "is-offline"
+                    : "is-waiting"
+            }`}
+          />
+          <b>
+            {agent.disabled
+              ? bi("Agent 已停用", "Agent Disabled")
+              : agent.online
+                ? bi("心跳正常 · 每 15s 实时上报", "Operational · 15s Heartbeat")
+                : agent.last_seen
+                  ? bi("心跳中断 · 当前离线", "Heartbeat Interrupted")
+                  : bi("等待首次心跳接入", "Awaiting First Heartbeat")}
+          </b>
+          {uptimePct !== null && (
+            <span
+              className={`ua-uptime-pill num ${
+                uptimePct >= 99 ? "is-ok" : uptimePct >= 80 ? "is-warn" : "is-bad"
+              }`}
+            >
+              {bi(`近 60 分钟在线率 ${uptimePct}%`, `60m Uptime ${uptimePct}%`)}
+            </span>
+          )}
         </div>
 
-        <div className="ec-probe-item">
-          <span className="ec-probe-lbl">{bi("CPU 与负载", "CPU & Load")}</span>
-          <div className="ec-probe-val num">
-            <b>{probe?.cpu_cores ? bi(`${probe.cpu_cores} 核`, `${probe.cpu_cores} vCPU`) : "—"}</b>
-            {probe?.arch && <span>{probe.arch}</span>}
-          </div>
-          <span className="ec-probe-sub num">
-            {probe?.load1 !== undefined
-              ? `Load ${probe.load1.toFixed(2)} / ${(probe.load5 ?? 0).toFixed(2)}`
-              : "—"}
-          </span>
-        </div>
-
-        <div className="ec-probe-item">
-          <span className="ec-probe-lbl">{bi("内存使用率", "Memory")}</span>
-          <div className="ec-probe-val num">
-            <b>{probe?.mem_used_pct !== undefined ? `${memPct.toFixed(1)}%` : "—"}</b>
-            {memTotalGB && <span>{bi(`共 ${memTotalGB} GB`, `/ ${memTotalGB} GB`)}</span>}
-          </div>
-          <div className="ec-probe-bar">
-            <i className={barTone(memPct)} style={{ width: `${memPct}%` }} />
-          </div>
-        </div>
-
-        <div className="ec-probe-item">
-          <span className="ec-probe-lbl">{bi("根分区与运行时长", "Root Disk & Uptime")}</span>
-          <div className="ec-probe-val num">
-            <b>{probe?.disk_used_pct !== undefined ? `${diskPct.toFixed(1)}%` : "—"}</b>
-            {probe?.disk_total_gb ? (
+        <div className="ua-pulse-right">
+          {hoverSummary ? (
+            <span className="ua-pulse-hover-readout mono">{hoverSummary}</span>
+          ) : (
+            <span className="ua-pulse-legend">
               <span>
-                {probe.disk_total_gb.toFixed(0)} GB
-                {probe.uptime_sec ? ` · ${fmtUptime(probe.uptime_sec)}` : ""}
+                <i className="is-ok" />
+                {bi("正常", "OK")}
               </span>
-            ) : null}
+              <span>
+                <i className="is-warn" />
+                {bi("高负载", "High Load")}
+              </span>
+              <span>
+                <i className="is-miss" />
+                {bi("丢失", "Missed")}
+              </span>
+            </span>
+          )}
+          {onOpenDetail && (
+            <Button size="small" type="secondary" onClick={onOpenDetail}>
+              {bi("心跳与探针记录", "Heartbeat & Probe Log")} <IconRight />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="ua-hb-bars"
+        role="img"
+        aria-label={bi("近 60 分钟心跳状态条", "Last 60 minutes heartbeat bars")}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        {slots.map((s, idx) => (
+          <span
+            key={s.key}
+            className={`ua-hb-bar is-${s.tone} ${hoverIdx === idx ? "is-hover" : ""}`}
+            onMouseEnter={() => setHoverIdx(idx)}
+            onClick={onOpenDetail}
+          />
+        ))}
+      </div>
+
+      <div className="ua-hb-axis num">
+        <span>{bi("60 分钟前", "60m ago")}</span>
+        <span>
+          {agent.last_seen
+            ? `${bi("最近上报", "Last report")}: ${fullTime(agent.last_seen)}`
+            : bi("尚未收到心跳包", "No heartbeat packets yet")}
+        </span>
+        <span>{bi("现在", "Now")}</span>
+      </div>
+    </div>
+  );
+}
+
+function HostProbeOverviewCard({
+  agent,
+  onOpenProbeDrawer,
+  onOpenGuide,
+}: {
+  agent: UnifiedAgentView;
+  onOpenProbeDrawer: () => void;
+  onOpenGuide: () => void;
+}) {
+  useLang();
+  const probe = agent.probe;
+  const probed = hasProbeMetrics(probe);
+  const memPct = Math.min(100, Math.max(0, probe?.mem_used_pct ?? 0));
+  const diskPct = Math.min(100, Math.max(0, probe?.disk_used_pct ?? 0));
+  const memTotalGB = probe?.mem_total_mb ? probe.mem_total_mb / 1024 : 0;
+  const memUsedGB = memTotalGB > 0 ? (memTotalGB * memPct) / 100 : 0;
+  const loadPct =
+    probe?.load1 !== undefined && probe?.cpu_cores
+      ? Math.min(100, Math.max(0, (probe.load1 / probe.cpu_cores) * 100))
+      : 0;
+  const barTone = (pct: number) =>
+    pct >= 90 ? "is-bad" : pct >= 75 ? "is-warn" : "";
+  const svcName = agent.service_name || "middleware-execution";
+  const restartCmd = `sudo systemctl restart ${svcName} && sudo systemctl status ${svcName}`;
+
+  return (
+    <div className="ua-overview-stack">
+      <div className="ec-surface-card ua-telemetry-surface">
+        <HeartbeatPulseBars agent={agent} onOpenDetail={onOpenProbeDrawer} />
+
+        <div className="ec-probe-grid ua-probe-divider">
+          <div className="ec-probe-item" onClick={onOpenProbeDrawer}>
+            <span className="ec-probe-lbl">
+              {bi("主机名与操作系统", "Hostname & OS")}
+            </span>
+            <div className="ec-probe-val">
+              <b>{probe?.hostname || agent.ip}</b>
+              {probe?.arch && <span>{probe.arch}</span>}
+            </div>
+            <span
+              className="ec-probe-sub"
+              title={[probe?.os, probe?.kernel].filter(Boolean).join(" · ")}
+            >
+              {probed
+                ? [probe?.os, probe?.kernel].filter(Boolean).join(" · ") || svcName
+                : `${bi("服务单元", "systemd")}: ${svcName}`}
+            </span>
           </div>
-          <div className="ec-probe-bar">
-            <i className={barTone(diskPct)} style={{ width: `${diskPct}%` }} />
+
+          <div className="ec-probe-item" onClick={onOpenProbeDrawer}>
+            <span className="ec-probe-lbl">
+              {bi("CPU 与系统负载", "CPU & Load Average")}
+            </span>
+            {probed && (probe?.cpu_cores || probe?.load1 !== undefined) ? (
+              <>
+                <div className="ec-probe-val num">
+                  <b>
+                    {probe?.cpu_cores
+                      ? bi(`${probe.cpu_cores} 核`, `${probe.cpu_cores} vCPU`)
+                      : "—"}
+                  </b>
+                  {probe?.load1 !== undefined && (
+                    <span>
+                      Load {probe.load1.toFixed(2)} / {(probe.load5 ?? 0).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div className="ec-probe-bar">
+                  <i className={barTone(loadPct)} style={{ width: `${loadPct}%` }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="ec-probe-val num">
+                  <b>—</b>
+                  <span>{bi("等待探针上报", "Awaiting probe")}</span>
+                </div>
+                <div className="ec-probe-bar">
+                  <i style={{ width: "0%" }} />
+                </div>
+              </>
+            )}
           </div>
+
+          <div className="ec-probe-item" onClick={onOpenProbeDrawer}>
+            <span className="ec-probe-lbl">
+              {bi("物理内存占用", "Memory Usage")}
+            </span>
+            {probed && probe?.mem_used_pct !== undefined ? (
+              <>
+                <div className="ec-probe-val num">
+                  <b>{`${memPct.toFixed(1)}%`}</b>
+                  {memTotalGB > 0 && (
+                    <span>{`${memUsedGB.toFixed(1)} / ${memTotalGB.toFixed(1)} GB`}</span>
+                  )}
+                </div>
+                <div className="ec-probe-bar">
+                  <i className={barTone(memPct)} style={{ width: `${memPct}%` }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="ec-probe-val num">
+                  <b>—</b>
+                  <span>{bi("随心跳自动同步", "Synced on heartbeat")}</span>
+                </div>
+                <div className="ec-probe-bar">
+                  <i style={{ width: "0%" }} />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="ec-probe-item" onClick={onOpenProbeDrawer}>
+            <span className="ec-probe-lbl">
+              {bi("根分区磁盘与运行时长", "Root Disk & Uptime")}
+            </span>
+            {probed && probe?.disk_used_pct !== undefined ? (
+              <>
+                <div className="ec-probe-val num">
+                  <b>{`${diskPct.toFixed(1)}%`}</b>
+                  <span>
+                    {probe.disk_total_gb ? `${probe.disk_total_gb.toFixed(0)} GB` : ""}
+                    {probe.uptime_sec ? ` · ${fmtUptime(probe.uptime_sec)}` : ""}
+                  </span>
+                </div>
+                <div className="ec-probe-bar">
+                  <i className={barTone(diskPct)} style={{ width: `${diskPct}%` }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="ec-probe-val num">
+                  <b>
+                    {agent.online
+                      ? bi("在线运行中", "Online")
+                      : agent.disabled
+                        ? bi("已停用", "Disabled")
+                        : bi("未连接", "Offline")}
+                  </b>
+                </div>
+                <span className="ec-probe-sub num">
+                  {agent.last_seen
+                    ? `${bi("上次在线", "Last seen")} ${ago(agent.last_seen)}`
+                    : bi("尚未上报首次心跳", "No heartbeat reported yet")}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!agent.online && !agent.disabled && (
+        <div className="ua-diag-strip">
+          <div className="ua-diag-txt">
+            <span className="ec-state-dot is-offline" />
+            <span>
+              {agent.last_seen
+                ? bi(
+                    `当前未收到实时心跳（上次在线 ${fullTime(agent.last_seen)}），可在机器上重启服务恢复：`,
+                    `Agent is offline (last seen ${fullTime(agent.last_seen)}). Restart service on the machine:`,
+                  )
+                : bi(
+                    "尚未收到首次心跳，请确认已在目标机器运行安装脚本或检查服务状态：",
+                    "No heartbeat received yet. Verify installation or check service status:",
+                  )}
+            </span>
+            <code className="ua-diag-code mono">{restartCmd}</code>
+          </div>
+          <div className="ua-diag-acts">
+            <Button
+              size="small"
+              type="secondary"
+              icon={<IconCopy />}
+              onClick={() =>
+                copy(restartCmd, bi("已复制服务重启命令", "Copied restart command"))
+              }
+            >
+              {bi("复制命令", "Copy")}
+            </Button>
+            <Button size="small" type="text" onClick={onOpenGuide}>
+              {bi("更多命令", "More")}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Dual-Pane Cluster Transfer Box (穿梭框) for associating clusters with an Agent */
+function AgentClusterTransfer({
+  agent,
+  clusters,
+  manageableSet,
+  busy,
+  onBind,
+  onUnbind,
+}: {
+  agent: UnifiedAgentView;
+  clusters: ClusterView[];
+  manageableSet: Set<string>;
+  busy: boolean;
+  onBind: (cids: string[]) => void;
+  onUnbind: (cids: string[]) => void;
+}) {
+  useLang();
+  const [leftKw, setLeftKw] = useState("");
+  const [rightKw, setRightKw] = useState("");
+  const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
+  const [rightChecked, setRightChecked] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setLeftChecked(new Set());
+    setRightChecked(new Set());
+  }, [agent.id, agent.clusters.join(",")]);
+
+  const clusterById = useMemo(
+    () => new Map(clusters.map((c) => [c.id, c])),
+    [clusters],
+  );
+  const boundSet = useMemo(() => new Set(agent.clusters), [agent.clusters]);
+
+  const lq = leftKw.trim().toLowerCase();
+  const availableList = useMemo(
+    () =>
+      clusters.filter(
+        (c) =>
+          !boundSet.has(c.id) &&
+          manageableSet.has(c.id) &&
+          (!lq ||
+            c.id.toLowerCase().includes(lq) ||
+            c.app_name.toLowerCase().includes(lq)),
+      ),
+    [clusters, boundSet, manageableSet, lq],
+  );
+
+  const rq = rightKw.trim().toLowerCase();
+  const boundList = useMemo(
+    () =>
+      agent.clusters.filter((cid) => {
+        if (!rq) return true;
+        const m = clusterById.get(cid);
+        return (
+          cid.toLowerCase().includes(rq) ||
+          (m?.app_name || "").toLowerCase().includes(rq)
+        );
+      }),
+    [agent.clusters, clusterById, rq],
+  );
+
+  const manageableBoundList = useMemo(
+    () => boundList.filter((cid) => manageableSet.has(cid)),
+    [boundList, manageableSet],
+  );
+
+  const allLeftChecked =
+    availableList.length > 0 && availableList.every((c) => leftChecked.has(c.id));
+  const someLeftChecked =
+    availableList.some((c) => leftChecked.has(c.id)) && !allLeftChecked;
+
+  const allRightChecked =
+    manageableBoundList.length > 0 &&
+    manageableBoundList.every((cid) => rightChecked.has(cid));
+  const someRightChecked =
+    manageableBoundList.some((cid) => rightChecked.has(cid)) && !allRightChecked;
+
+  const toggleLeftAll = (checked: boolean) => {
+    setLeftChecked((prev) => {
+      const next = new Set(prev);
+      for (const c of availableList) {
+        if (checked) next.add(c.id);
+        else next.delete(c.id);
+      }
+      return next;
+    });
+  };
+
+  const toggleRightAll = (checked: boolean) => {
+    setRightChecked((prev) => {
+      const next = new Set(prev);
+      for (const cid of manageableBoundList) {
+        if (checked) next.add(cid);
+        else next.delete(cid);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="ds-transfer">
+      {/* Left Pane: Available Manageable Clusters */}
+      <div className="ds-tf-pane">
+        <div className="ds-tf-head">
+          <label className="ds-tf-head-chk">
+            <Checkbox
+              checked={allLeftChecked}
+              indeterminate={someLeftChecked}
+              disabled={availableList.length === 0 || busy}
+              onChange={toggleLeftAll}
+            />
+            <b>{bi("可关联集群", "Available Clusters")}</b>
+          </label>
+          <span className="ds-tf-cnt num">
+            {leftChecked.size > 0
+              ? `${leftChecked.size} / ${availableList.length}`
+              : availableList.length}
+          </span>
+        </div>
+        <div className="ds-tf-search">
+          <Input
+            size="small"
+            prefix={<IconSearch />}
+            allowClear
+            value={leftKw}
+            onChange={setLeftKw}
+            placeholder={bi("搜索可关联的集群或中间件…", "Search available clusters…")}
+          />
+        </div>
+        <div className="ds-tf-list">
+          {availableList.length === 0 ? (
+            <div className="ds-tf-empty">
+              {lq
+                ? bi("没有匹配的可关联集群", "No matching clusters")
+                : manageableSet.size === 0
+                  ? bi("当前账号暂无可运维的集群", "No operable clusters")
+                  : bi("你有权限的全部集群均已关联", "All operable clusters are associated")}
+            </div>
+          ) : (
+            availableList.map((c) => {
+              const checked = leftChecked.has(c.id);
+              const isLocal = Boolean(agent.suggested_clusters?.includes(c.id));
+              return (
+                <div
+                  key={c.id}
+                  className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                  onClick={() => {
+                    if (busy) return;
+                    setLeftChecked((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.delete(c.id);
+                      else next.add(c.id);
+                      return next;
+                    });
+                  }}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={busy}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(v) =>
+                      setLeftChecked((prev) => {
+                        const next = new Set(prev);
+                        if (v) next.add(c.id);
+                        else next.delete(c.id);
+                        return next;
+                      })
+                    }
+                  />
+                  <div className="ds-tf-item-main">
+                    <span className="ds-tf-id mono" title={c.id}>
+                      {c.id}
+                    </span>
+                    <span className="iam-app-pill">
+                      {c.app_name} {c.version}
+                    </span>
+                    {isLocal && (
+                      <span className="ua-path-badge is-local">
+                        {bi("本机 IP", "Local")}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="ds-tf-quick-btn"
+                    title={bi("立即关联此集群", "Associate immediately")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBind([c.id]);
+                    }}
+                  >
+                    <IconPlus />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Center Action Buttons */}
+      <div className="ds-tf-mid">
+        <Button
+          size="small"
+          type="primary"
+          disabled={leftChecked.size === 0 || busy}
+          loading={busy && leftChecked.size > 0}
+          onClick={() => onBind(Array.from(leftChecked))}
+        >
+          <span>
+            {leftChecked.size > 0
+              ? bi(`关联 (${leftChecked.size})`, `Add (${leftChecked.size})`)
+              : bi("关联", "Add")}
+          </span>
+          <IconArrowRight />
+        </Button>
+        <Button
+          size="small"
+          type="secondary"
+          disabled={rightChecked.size === 0 || busy}
+          loading={busy && rightChecked.size > 0}
+          onClick={() => onUnbind(Array.from(rightChecked))}
+        >
+          <IconArrowLeft />
+          <span>
+            {rightChecked.size > 0
+              ? bi(`移除 (${rightChecked.size})`, `Remove (${rightChecked.size})`)
+              : bi("移除", "Remove")}
+          </span>
+        </Button>
+      </div>
+
+      {/* Right Pane: Associated Clusters */}
+      <div className="ds-tf-pane is-target">
+        <div className="ds-tf-head">
+          <label className="ds-tf-head-chk">
+            <Checkbox
+              checked={allRightChecked}
+              indeterminate={someRightChecked}
+              disabled={manageableBoundList.length === 0 || busy}
+              onChange={toggleRightAll}
+            />
+            <b>{bi("已关联集群", "Associated Clusters")}</b>
+          </label>
+          <span className="ds-tf-cnt is-brand num">
+            {rightChecked.size > 0
+              ? `${rightChecked.size} / ${boundList.length}`
+              : boundList.length}
+          </span>
+        </div>
+        <div className="ds-tf-search">
+          <Input
+            size="small"
+            prefix={<IconSearch />}
+            allowClear
+            value={rightKw}
+            onChange={setRightKw}
+            placeholder={bi("筛选已关联集群…", "Filter associated clusters…")}
+          />
+        </div>
+        <div className="ds-tf-list">
+          {boundList.length === 0 ? (
+            <div className="ds-tf-empty">
+              {rq
+                ? bi("没有匹配的已关联集群", "No matching clusters")
+                : bi(
+                    "尚未关联集群；从左侧勾选或点击「+」即可移入",
+                    "None associated yet. Select on the left to add.",
+                  )}
+            </div>
+          ) : (
+            boundList.map((cid) => {
+              const canOp = manageableSet.has(cid);
+              const checked = rightChecked.has(cid);
+              const cMeta = clusterById.get(cid);
+              const isLocal = Boolean(agent.suggested_clusters?.includes(cid));
+              return (
+                <div
+                  key={cid}
+                  className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                  onClick={() => {
+                    if (!canOp || busy) return;
+                    setRightChecked((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.delete(cid);
+                      else next.add(cid);
+                      return next;
+                    });
+                  }}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={!canOp || busy}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(v) =>
+                      setRightChecked((prev) => {
+                        const next = new Set(prev);
+                        if (v) next.add(cid);
+                        else next.delete(cid);
+                        return next;
+                      })
+                    }
+                  />
+                  <div className="ds-tf-item-main">
+                    <a
+                      href={`#/d/${encodeURIComponent(cid)}`}
+                      className="ds-tf-link mono"
+                      title={bi(`打开集群 ${cid}`, `Open ${cid}`)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        go({ name: "deliveries", id: cid });
+                      }}
+                    >
+                      {cid}
+                    </a>
+                    {cMeta && (
+                      <span className="iam-app-pill">
+                        {cMeta.app_name} {cMeta.version}
+                      </span>
+                    )}
+                    <span className={`ua-path-badge ${isLocal ? "is-local" : ""}`}>
+                      {isLocal
+                        ? bi("本机直连", "Local Direct")
+                        : bi("远程代管", "Jumpbox")}
+                    </span>
+                  </div>
+                  {canOp && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="ds-tf-quick-btn is-rm"
+                      title={bi("解除关联", "Unbind")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUnbind([cid]);
+                      }}
+                    >
+                      <IconClose />
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Dedicated Slide-Over Drawer for Heartbeat History Timeline & Host Probe Telemetry */
+function HeartbeatAndProbeDrawer({
+  agent,
+  visible,
+  onClose,
+}: {
+  agent: UnifiedAgentView | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  useLang();
+  const records = useMemo(() => {
+    if (!agent) return [];
+    const list = [...(agent.heartbeats || [])];
+    if (list.length === 0 && agent.last_seen) {
+      list.push({
+        at: agent.last_seen,
+        load1: agent.probe?.load1,
+        mem_pct: agent.probe?.mem_used_pct,
+        disk_pct: agent.probe?.disk_used_pct,
+      });
+    }
+    return list.reverse();
+  }, [agent]);
+
+  const probe = agent?.probe;
+  const memPct = Math.min(100, Math.max(0, probe?.mem_used_pct ?? 0));
+  const diskPct = Math.min(100, Math.max(0, probe?.disk_used_pct ?? 0));
+  const memTotalGB = probe?.mem_total_mb ? probe.mem_total_mb / 1024 : 0;
+
+  return (
+    <Drawer
+      width={660}
+      style={{ maxWidth: "100vw" }}
+      visible={visible && !!agent}
+      onCancel={onClose}
+      footer={null}
+      title={
+        agent ? (
+          <span className="iam-drawer-title">
+            <span>{bi("心跳监控与主机探针详情", "Heartbeat & Host Probe")}</span>
+            <code className="mono">{agent.name}</code>
+          </span>
+        ) : (
+          ""
+        )
+      }
+    >
+      {agent && (
+        <div className="ua-probe-drawer">
+          <HeartbeatPulseBars agent={agent} />
+
+          <div className="ua-pd-sec">
+            <h4>{bi("主机硬件与系统实时探针", "Real-Time Host Probe Specs")}</h4>
+            <div className="ua-pd-facts">
+              <div>
+                <span>{bi("机器 IP", "Host IP")}</span>
+                <b className="mono">{agent.ip}</b>
+              </div>
+              <div>
+                <span>{bi("主机名", "Hostname")}</span>
+                <b className="mono">{probe?.hostname || "—"}</b>
+              </div>
+              <div>
+                <span>{bi("操作系统", "OS")}</span>
+                <b>{probe?.os || "—"}</b>
+              </div>
+              <div>
+                <span>{bi("内核与架构", "Kernel & Arch")}</span>
+                <b className="mono">
+                  {[probe?.kernel, probe?.arch].filter(Boolean).join(" · ") || "—"}
+                </b>
+              </div>
+              <div>
+                <span>{bi("CPU 与负载", "CPU & Load")}</span>
+                <b className="num">
+                  {probe?.cpu_cores ? `${probe.cpu_cores} vCPU` : "—"}
+                  {probe?.load1 !== undefined
+                    ? ` · Load ${probe.load1.toFixed(2)} / ${(probe.load5 ?? 0).toFixed(2)}`
+                    : ""}
+                </b>
+              </div>
+              <div>
+                <span>{bi("内存与根分区", "Memory & Root Disk")}</span>
+                <b className="num">
+                  {probe?.mem_used_pct !== undefined
+                    ? `${memPct.toFixed(1)}%${memTotalGB > 0 ? ` (${memTotalGB.toFixed(1)}G)` : ""}`
+                    : "—"}
+                  {" / "}
+                  {probe?.disk_used_pct !== undefined
+                    ? `${diskPct.toFixed(1)}%${probe.disk_total_gb ? ` (${probe.disk_total_gb.toFixed(0)}G)` : ""}`
+                    : "—"}
+                </b>
+              </div>
+              <div>
+                <span>{bi("系统运行时长", "System Uptime")}</span>
+                <b className="num">{fmtUptime(probe?.uptime_sec) || "—"}</b>
+              </div>
+              <div>
+                <span>{bi("Agent 服务与版本", "Service & Version")}</span>
+                <b className="mono">
+                  {agent.service_name || "middleware-execution"}
+                  {agent.version ? ` · v${agent.version}` : ""}
+                </b>
+              </div>
+            </div>
+          </div>
+
+          <div className="ua-pd-sec">
+            <div className="ua-pd-sec-head">
+              <h4>
+                {bi("心跳上报流水记录", "Heartbeat Telemetry History")}{" "}
+                <em className="num">{records.length}</em>
+              </h4>
+              <span className="faint small">
+                {bi("按分钟聚合保留最近 90 条上报快照", "Minute-bucketed rolling 90 samples")}
+              </span>
+            </div>
+
+            {records.length === 0 ? (
+              <div className="ua-pd-empty">
+                {bi(
+                  "尚未收到该机器上报的心跳记录；安装启动 Agent 后将每 15 秒自动上报心跳与资源指标。",
+                  "No heartbeats recorded yet. Reports automatically every 15s once started.",
+                )}
+              </div>
+            ) : (
+              <div className="ua-pd-log-wrap">
+                <table className="ua-pd-log-table num">
+                  <thead>
+                    <tr>
+                      <th>{bi("上报时间", "Timestamp")}</th>
+                      <th>{bi("状态", "Status")}</th>
+                      <th>{bi("CPU Load (1m)", "Load 1m")}</th>
+                      <th>{bi("内存占用", "Memory")}</th>
+                      <th>{bi("磁盘占用", "Disk")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((r, i) => {
+                      const high =
+                        (r.mem_pct !== undefined && r.mem_pct >= 85) ||
+                        (r.disk_pct !== undefined && r.disk_pct >= 90);
+                      return (
+                        <tr key={`${r.at}-${i}`}>
+                          <td className="mono">{fullTime(r.at)}</td>
+                          <td>
+                            <span className={`ua-hb-tag ${high ? "is-warn" : "is-ok"}`}>
+                              {high ? bi("高负载", "High Load") : bi("心跳正常", "Healthy")}
+                            </span>
+                          </td>
+                          <td className="mono">
+                            {r.load1 !== undefined ? r.load1.toFixed(2) : "—"}
+                          </td>
+                          <td className="mono">
+                            {r.mem_pct !== undefined ? `${r.mem_pct.toFixed(1)}%` : "—"}
+                          </td>
+                          <td className="mono">
+                            {r.disk_pct !== undefined ? `${r.disk_pct.toFixed(1)}%` : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Drawer>
   );
 }
 
@@ -301,9 +1089,9 @@ export function ExecutionNodes({
   useLang();
   const narrow = useMedia("(max-width: 900px)");
   const canManage = can("execution.manage");
-  const canGrant = can("execution.manage|iam.user|iam.team");
 
   const [agents, setAgents] = useState<UnifiedAgentView[]>([]);
+  const [manageableIds, setManageableIds] = useState<string[]>([]);
   const [bootInfo, setBootInfo] = useState<AutomationBootstrapInfo | null>(null);
   const [clusters, setClusters] = useState<ClusterView[]>(
     () => cached<ClusterView[]>("clusters") || [],
@@ -314,26 +1102,31 @@ export function ExecutionNodes({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string>("");
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
-  const [busyKey, setBusyKey] = useState<string>("");
+  const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
   const [guideOpen, setGuideOpen] = useState(false);
+  const [probeDrawerOpen, setProbeDrawerOpen] = useState(false);
 
   // Enroll Modal state
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollName, setEnrollName] = useState("");
   const [enrollIP, setEnrollIP] = useState("");
   const [enrollClusters, setEnrollClusters] = useState<string[]>([]);
-  const [enrollMode, setEnrollMode] = useState<AgentClusterMode>("readwrite");
   const [enrollBusy, setEnrollBusy] = useState(false);
   const [enrollment, setEnrollment] = useState<UnifiedEnrollment | null>(null);
   const [hubURL, setHubURL] = useState("");
   const [includeCA, setIncludeCA] = useState(true);
   const [bundleBusy, setBundleBusy] = useState(false);
 
-  // Add cluster popover
-  const [addPopOpen, setAddPopOpen] = useState(false);
-  const [addClusterKw, setAddClusterKw] = useState("");
-
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const setKeyBusy = (key: string, on: boolean) => {
+    setBusyMap((prev) => {
+      if (on) return { ...prev, [key]: true };
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   const loadAll = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -343,6 +1136,7 @@ export function ExecutionNodes({
         api<ClusterView[]>("/api/clusters").catch(() => cached<ClusterView[]>("clusters") || []),
       ]);
       setAgents(res.agents || []);
+      setManageableIds(res.manageable_clusters || []);
       setBootInfo(res.bootstrap || null);
       if (cls) {
         setClusters(cls);
@@ -367,7 +1161,6 @@ export function ExecutionNodes({
       setEnrollName(prefill.host || "");
       setEnrollIP(prefill.ip || "");
       setEnrollClusters(prefill.cluster ? [prefill.cluster] : []);
-      setEnrollMode("readwrite");
       setEnrollment(null);
       setEnrollOpen(true);
     }
@@ -402,6 +1195,8 @@ export function ExecutionNodes({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const manageableSet = useMemo(() => new Set(manageableIds), [manageableIds]);
 
   const counts = useMemo(() => {
     let online = 0;
@@ -438,16 +1233,10 @@ export function ExecutionNodes({
     [agents, filtered, selectedId],
   );
 
-  const clusterById = useMemo(
-    () => new Map(clusters.map((c) => [c.id, c])),
-    [clusters],
-  );
-
   const openEnrollModal = () => {
     setEnrollName("");
     setEnrollIP("");
     setEnrollClusters([]);
-    setEnrollMode("readwrite");
     setEnrollment(null);
     const defURL =
       bootInfo?.suggested_urls?.[0] || bootInfo?.origin || window.location.origin;
@@ -466,14 +1255,12 @@ export function ExecutionNodes({
     }
     setEnrollBusy(true);
     try {
-      const clusterModes: Record<string, AgentClusterMode> = {};
-      for (const cid of enrollClusters) clusterModes[cid] = enrollMode;
       const res = await api<UnifiedEnrollment>("/api/executions/unified-agents", {
         method: "POST",
         body: JSON.stringify({
           name,
           ip,
-          cluster_modes: clusterModes,
+          clusters: enrollClusters,
         }),
       });
       setEnrollment(res);
@@ -483,7 +1270,6 @@ export function ExecutionNodes({
         window.location.origin;
       setHubURL(defURL);
       setIncludeCA(Boolean(res.bootstrap?.ca_available));
-      invalidateIAMCache();
       await loadAll(true);
       setSelectedId(res.agent.id);
     } catch (e) {
@@ -535,15 +1321,15 @@ export function ExecutionNodes({
   };
 
   const toggleDisabled = async (agent: UnifiedAgentView, nextDisabled: boolean) => {
-    if (busyKey) return;
-    setBusyKey(`dis:${agent.id}`);
+    const k = `dis:${agent.id}`;
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
     try {
       const updated = await api<UnifiedAgentView>("/api/executions/unified-agents", {
         method: "PATCH",
         body: JSON.stringify({ id: agent.id, disabled: nextDisabled }),
       });
       setAgents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
-      invalidateIAMCache();
       Message.success(
         nextDisabled
           ? bi(`已禁用 Agent「${agent.name}」`, `Disabled Agent "${agent.name}"`)
@@ -552,49 +1338,77 @@ export function ExecutionNodes({
     } catch (e) {
       err(e);
     } finally {
-      setBusyKey("");
+      setKeyBusy(k, false);
     }
   };
 
-  const updateClusterMode = async (
-    agent: UnifiedAgentView,
-    clusterId: string,
-    mode: "" | AgentClusterMode,
-  ) => {
-    if (busyKey) return;
-    setBusyKey(`cm:${agent.id}:${clusterId}`);
+  const transferBind = async (agent: UnifiedAgentView, cids: string[]) => {
+    if (cids.length === 0) return;
+    const k = `xfer:${agent.id}`;
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
     try {
       const updated = await api<UnifiedAgentView>("/api/executions/unified-agents", {
         method: "PATCH",
         body: JSON.stringify({
           id: agent.id,
-          set_cluster: { cluster_id: clusterId, mode },
+          bind_clusters: cids,
         }),
       });
       setAgents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
-      invalidateIAMCache();
+      Message.success(
+        cids.length === 1
+          ? bi(`已关联集群「${cids[0]}」`, `Associated "${cids[0]}"`)
+          : bi(`已关联 ${cids.length} 个集群`, `Associated ${cids.length} clusters`),
+      );
     } catch (e) {
       err(e);
     } finally {
-      setBusyKey("");
+      setKeyBusy(k, false);
+    }
+  };
+
+  const transferUnbind = async (agent: UnifiedAgentView, cids: string[]) => {
+    if (cids.length === 0) return;
+    const k = `xfer:${agent.id}`;
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
+    try {
+      const updated = await api<UnifiedAgentView>("/api/executions/unified-agents", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: agent.id,
+          unbind_clusters: cids,
+        }),
+      });
+      setAgents((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      Message.success(
+        cids.length === 1
+          ? bi(`已移除集群「${cids[0]}」关联`, `Removed "${cids[0]}"`)
+          : bi(`已移除 ${cids.length} 个集群关联`, `Removed ${cids.length} clusters`),
+      );
+    } catch (e) {
+      err(e);
+    } finally {
+      setKeyBusy(k, false);
     }
   };
 
   const removeAgent = async (agent: UnifiedAgentView) => {
-    if (busyKey) return;
-    setBusyKey(`del:${agent.id}`);
+    const k = `del:${agent.id}`;
+    if (busyMap[k]) return;
+    setKeyBusy(k, true);
     try {
       await api("/api/executions/unified-agents", {
         method: "DELETE",
         body: JSON.stringify({ id: agent.id }),
       });
       setAgents((prev) => prev.filter((x) => x.id !== agent.id));
-      invalidateIAMCache();
       Message.success(bi(`已删除 Agent「${agent.name}」`, `Deleted "${agent.name}"`));
     } catch (e) {
       err(e);
     } finally {
-      setBusyKey("");
+      setKeyBusy(k, false);
     }
   };
 
@@ -606,97 +1420,8 @@ export function ExecutionNodes({
     : "ds-agent";
   const installCmd = `tar -xzf ${bundleSlug}.tar.gz && sudo bash ${bundleSlug}/install.sh`;
 
-  const unassignedClusters = useMemo(() => {
-    if (!selected) return [];
-    const aq = addClusterKw.trim().toLowerCase();
-    return clusters.filter(
-      (c) =>
-        !selected.cluster_modes?.[c.id] &&
-        (!aq ||
-          c.id.toLowerCase().includes(aq) ||
-          c.app_name.toLowerCase().includes(aq)),
-    );
-  }, [clusters, selected, addClusterKw]);
-
   const showList = !narrow || !mobileShowDetail || !selected;
   const showDetail = !narrow || (mobileShowDetail && !!selected);
-
-  const renderAddClusterPopover = (btnType: "secondary" | "outline" = "secondary") => {
-    if (!canGrant || clusters.length === 0 || !selected) return null;
-    return (
-      <Popover
-        trigger="click"
-        position="br"
-        popupVisible={addPopOpen}
-        onVisibleChange={(v) => {
-          setAddPopOpen(v);
-          if (!v) setAddClusterKw("");
-        }}
-        unmountOnExit
-        content={
-          <div className="iam-quick-pop">
-            <div className="iam-quick-pop-head">
-              <b>{bi("关联授权集群", "Authorize Cluster")}</b>
-            </div>
-            {clusters.length > 5 && (
-              <Input
-                size="small"
-                prefix={<IconSearch />}
-                allowClear
-                value={addClusterKw}
-                onChange={setAddClusterKw}
-                placeholder={bi("搜索集群…", "Search cluster…")}
-              />
-            )}
-            <div className="iam-quick-pop-list">
-              {unassignedClusters.length === 0 ? (
-                <p className="faint small" style={{ margin: "10px 4px", textAlign: "center" }}>
-                  {bi("全部可见集群均已关联", "All visible clusters are bound")}
-                </p>
-              ) : (
-                unassignedClusters.map((c) => (
-                  <div key={c.id} className="iam-quick-pop-row">
-                    <span className="iam-quick-pop-who">
-                      <IconStorage />
-                      <b className="mono">{c.id}</b>
-                    </span>
-                    <span className="iam-quick-pop-btns">
-                      <button
-                        type="button"
-                        disabled={!!busyKey}
-                        className="iam-lvl-tag is-view is-btn"
-                        onClick={() => {
-                          setAddPopOpen(false);
-                          void updateClusterMode(selected, c.id, "readonly");
-                        }}
-                      >
-                        {bi("+ 只读", "+ RO")}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!busyKey}
-                        className="iam-lvl-tag is-operate is-btn"
-                        onClick={() => {
-                          setAddPopOpen(false);
-                          void updateClusterMode(selected, c.id, "readwrite");
-                        }}
-                      >
-                        {bi("+ 读写", "+ RW")}
-                      </button>
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        }
-      >
-        <Button size="small" type={btnType} icon={<IconPlus />}>
-          {bi("关联集群", "Add Cluster")}
-        </Button>
-      </Popover>
-    );
-  };
 
   return (
     <div className={narrow ? "" : "md-split"}>
@@ -722,7 +1447,7 @@ export function ExecutionNodes({
                     icon={<IconPlus />}
                     onClick={openEnrollModal}
                   >
-                    {bi("接入", "Enroll")}
+                    {bi("接入 Agent", "Enroll")}
                   </Button>
                 )}
               </div>
@@ -769,6 +1494,8 @@ export function ExecutionNodes({
                 <button
                   key={k}
                   type="button"
+                  role="tab"
+                  aria-selected={statusFilter === k}
                   className={`ec-role-pill ${statusFilter === k ? "on" : ""}`}
                   onClick={() => setStatusFilter(k)}
                 >
@@ -882,8 +1609,8 @@ export function ExecutionNodes({
                 <h3>{bi("接入 Agent 以开启集群自动化执行", "Enroll an Agent to Automate Clusters")}</h3>
                 <p className="faint">
                   {bi(
-                    "既可在 1 台管理/跳板机部署 Agent 代管多个集群，也可直接在业务目标机部署免密码直连执行。",
-                    "Deploy 1 Agent on a jumpbox to manage multiple clusters, or install directly on target hosts.",
+                    "部署 Agent 到机器并关联目标集群后，即可在对应集群内选择该 Agent 执行探针采集与变更步骤。",
+                    "Deploy an Agent on a machine and associate clusters to run probes and change steps.",
                   )}
                 </p>
                 {canManage && (
@@ -955,13 +1682,12 @@ export function ExecutionNodes({
                         <Switch
                           size="small"
                           checked={!selected.disabled}
-                          loading={busyKey === `dis:${selected.id}`}
+                          loading={Boolean(busyMap[`dis:${selected.id}`])}
                           onChange={(checked) => void toggleDisabled(selected, !checked)}
                         />
                       </label>
                     )}
                     <Button
-                      size="small"
                       type="secondary"
                       icon={<IconBook />}
                       onClick={() => setGuideOpen(true)}
@@ -982,13 +1708,13 @@ export function ExecutionNodes({
                         onOk={() => void removeAgent(selected)}
                       >
                         <Button
-                          size="small"
                           type="secondary"
                           status="danger"
-                          loading={busyKey === `del:${selected.id}`}
+                          loading={Boolean(busyMap[`del:${selected.id}`])}
                           icon={<IconDelete />}
-                          aria-label={bi("删除 Agent", "Delete Agent")}
-                        />
+                        >
+                          {bi("删除", "Delete")}
+                        </Button>
                       </Popconfirm>
                     )}
                   </div>
@@ -997,21 +1723,10 @@ export function ExecutionNodes({
                 <div className="ec-detail-grid">
                   <div className="ec-detail-main">
                     <section className="ec-sec">
-                      <div className="ec-sec-head">
-                        <h2 className="ec-sec-title">
-                          {bi("主机实时状态", "Host Telemetry")}
-                        </h2>
-                        {hasProbeMetrics(selected.probe) && selected.online && (
-                          <span className="ec-sec-badge is-live">
-                            {bi("每 15s 自动同步", "Live · 15s")}
-                          </span>
-                        )}
-                      </div>
-                      <ProbeTelemetrySection
-                        probe={selected.probe}
-                        online={selected.online}
-                        disabled={selected.disabled}
-                        lastSeen={selected.last_seen}
+                      <HostProbeOverviewCard
+                        agent={selected}
+                        onOpenProbeDrawer={() => setProbeDrawerOpen(true)}
+                        onOpenGuide={() => setGuideOpen(true)}
                       />
                     </section>
 
@@ -1019,124 +1734,25 @@ export function ExecutionNodes({
                       <div className="ec-sec-head">
                         <div>
                           <h2 className="ec-sec-title">
-                            {bi("关联集群与权限", "Authorized Clusters")}{" "}
-                            <span className="faint num" style={{ fontWeight: 500 }}>
-                              {selected.clusters.length}
-                            </span>
+                            {bi("集群关联配置", "Cluster Associations")}
                           </h2>
                           <p className="ec-sec-sub">
                             {bi(
-                              "只读仅允许采集探针；读写允许执行部署、变更演练与回滚（与「IAM → 集群权限」同步）。",
-                              "Read-only allows probes; Read-write allows deployments, rehearsals, and rollbacks.",
+                              "可将你拥有运维权限的集群移至右侧完成关联；关联后即可在对应集群中选择此 Agent 开始执行。",
+                              "Move any cluster you have operate access on to the right pane to associate it with this Agent.",
                             )}
                           </p>
                         </div>
-                        <div className="ua-sec-head-acts">
-                          {renderAddClusterPopover("secondary")}
-                          <Button
-                            size="small"
-                            type="text"
-                            onClick={() => go({ name: "accounts", id: "~clusters" })}
-                          >
-                            {bi("IAM 集群权限 →", "IAM Cluster Access →")}
-                          </Button>
-                        </div>
                       </div>
 
-                      {selected.clusters.length === 0 ? (
-                        <div className="ua-cluster-empty">
-                          <div className="ua-cluster-empty-row">
-                            <span className="faint">
-                              {bi(
-                                "尚未关联集群；关联后即可在对应集群内选择此 Agent 开始执行。",
-                                "Not associated with any cluster yet.",
-                              )}
-                            </span>
-                            {renderAddClusterPopover("outline")}
-                          </div>
-                          {canGrant &&
-                            (selected.suggested_clusters || []).length > 0 && (
-                              <div className="ua-suggest-bar">
-                                <span className="small faint">
-                                  {bi("包含本机 IP 的集群：", "Matching host IP:")}
-                                </span>
-                                {(selected.suggested_clusters || []).map((cid) => (
-                                  <button
-                                    key={cid}
-                                    type="button"
-                                    className="iam-add-grant-chip"
-                                    onClick={() =>
-                                      void updateClusterMode(selected, cid, "readwrite")
-                                    }
-                                  >
-                                    <IconPlus />
-                                    <span className="mono">{cid}</span>
-                                    <em>{bi("关联读写", "Bind RW")}</em>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                        </div>
-                      ) : (
-                        <div className="ec-surface-card">
-                          {selected.clusters.map((cid) => {
-                            const mode = selected.cluster_modes[cid] || "readonly";
-                            const cMeta = clusterById.get(cid);
-                            const isLocalHost = Boolean(
-                              selected.suggested_clusters?.includes(cid),
-                            );
-                            const rowBusy = busyKey === `cm:${selected.id}:${cid}`;
-                            return (
-                              <div
-                                key={cid}
-                                className={`ua-cluster-row ${rowBusy ? "is-busy" : ""}`}
-                              >
-                                <div className="ua-cluster-info">
-                                  <a
-                                    href={`#/d/${encodeURIComponent(cid)}`}
-                                    className="ua-cluster-link mono"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      go({ name: "deliveries", id: cid });
-                                    }}
-                                  >
-                                    {cid}
-                                  </a>
-                                  {cMeta && (
-                                    <span className="iam-app-pill">
-                                      {cMeta.app_name} {cMeta.version}
-                                    </span>
-                                  )}
-                                  <span
-                                    className={`ua-path-badge ${isLocalHost ? "is-local" : ""}`}
-                                  >
-                                    {isLocalHost
-                                      ? bi("本机免密直连", "Local Direct")
-                                      : bi("远程代管", "Jumpbox")}
-                                  </span>
-                                </div>
-                                <div className="ua-cluster-ctrl">
-                                  <AgentModeSwitch
-                                    value={mode}
-                                    disabled={!canGrant || !!busyKey}
-                                    onChange={(next) =>
-                                      void updateClusterMode(selected, cid, next)
-                                    }
-                                  />
-                                  <button
-                                    type="button"
-                                    className="iam-row-go"
-                                    aria-label={cid}
-                                    onClick={() => go({ name: "deliveries", id: cid })}
-                                  >
-                                    <IconRight />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <AgentClusterTransfer
+                        agent={selected}
+                        clusters={clusters}
+                        manageableSet={manageableSet}
+                        busy={Boolean(busyMap[`xfer:${selected.id}`])}
+                        onBind={(cids) => void transferBind(selected, cids)}
+                        onUnbind={(cids) => void transferUnbind(selected, cids)}
+                      />
                     </section>
                   </div>
                 </div>
@@ -1145,6 +1761,12 @@ export function ExecutionNodes({
           </article>
         </main>
       )}
+
+      <HeartbeatAndProbeDrawer
+        agent={selected}
+        visible={probeDrawerOpen}
+        onClose={() => setProbeDrawerOpen(false)}
+      />
 
       <Modal
         visible={enrollOpen}
@@ -1186,27 +1808,23 @@ export function ExecutionNodes({
 
             {clusters.length > 0 && (
               <label className="ua-field">
-                <div className="ua-field-head">
-                  <span>{bi("关联集群（可选）", "Initial Clusters (Optional)")}</span>
-                  {enrollClusters.length > 0 && (
-                    <AgentModeSwitch
-                      value={enrollMode}
-                      onChange={(m) => {
-                        if (m) setEnrollMode(m);
-                      }}
-                    />
-                  )}
-                </div>
+                <span>{bi("初始关联集群（可选）", "Associated Clusters (Optional)")}</span>
                 <Select
                   mode="multiple"
                   allowClear
+                  showSearch
+                  maxTagCount={3}
                   value={enrollClusters}
                   onChange={setEnrollClusters}
-                  placeholder={bi("选择要关联授权的集群…", "Select clusters to authorize…")}
-                  options={clusters.map((c) => ({
-                    value: c.id,
-                    label: `${c.id} · ${c.app_name} ${c.version}`,
-                  }))}
+                  getPopupContainer={() => document.body}
+                  triggerProps={{ autoFitPosition: true }}
+                  placeholder={bi("也可接入后在页面穿梭框中批量关联…", "Or associate in bulk via the transfer box after enrollment…")}
+                  options={clusters
+                    .filter((c) => manageableSet.has(c.id))
+                    .map((c) => ({
+                      value: c.id,
+                      label: `${c.id} · ${c.app_name} ${c.version}`,
+                    }))}
                 />
               </label>
             )}

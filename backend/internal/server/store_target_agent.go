@@ -153,34 +153,81 @@ func sanitizeAgentHostProbe(in *agentHostProbe) *agentHostProbe {
 	return out
 }
 
+type agentHeartbeatSample struct {
+	At      string   `json:"at"`
+	Load1   *float64 `json:"load1,omitempty"`
+	MemPct  *float64 `json:"mem_pct,omitempty"`
+	DiskPct *float64 `json:"disk_pct,omitempty"`
+}
+
+func appendAgentHeartbeat(prev []agentHeartbeatSample, at string, probe *agentHostProbe) []agentHeartbeatSample {
+	if strings.TrimSpace(at) == "" {
+		return prev
+	}
+	sample := agentHeartbeatSample{At: at}
+	if probe != nil {
+		if probe.CPUCores > 0 || probe.Load1 > 0 {
+			v := probe.Load1
+			sample.Load1 = &v
+		}
+		if probe.MemTotalMB > 0 || probe.MemUsedPct > 0 {
+			v := probe.MemUsedPct
+			sample.MemPct = &v
+		}
+		if probe.DiskTotalGB > 0 || probe.DiskUsedPct > 0 {
+			v := probe.DiskUsedPct
+			sample.DiskPct = &v
+		}
+	}
+	minuteKey := func(ts string) string {
+		if len(ts) >= 16 {
+			return ts[:16]
+		}
+		return ts
+	}
+	mk := minuteKey(at)
+	out := append([]agentHeartbeatSample(nil), prev...)
+	if n := len(out); n > 0 && minuteKey(out[n-1].At) == mk {
+		out[n-1] = sample
+	} else {
+		out = append(out, sample)
+	}
+	const maxSamples = 90
+	if len(out) > maxSamples {
+		out = out[len(out)-maxSamples:]
+	}
+	return out
+}
+
 // A target identity is deliberately scoped to explicitly authorized cluster(s) or a delivery/executor.
 // No silent machine matching by IP alone, shared enrollment token, or arbitrary commands.
 type targetAgent struct {
-	ID             string          `json:"id"`
-	Job            string          `json:"job,omitempty"`
-	Cluster        string            `json:"cluster,omitempty"`
-	Clusters       []string          `json:"clusters,omitempty"`
-	ClusterModes   map[string]string `json:"cluster_modes,omitempty"`
-	Node           string            `json:"node,omitempty"`
-	Mode           string            `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
-	Disabled       bool              `json:"disabled,omitempty"`
-	AllowMutating  bool              `json:"allow_mutating,omitempty"`
-	Capabilities   []string        `json:"capabilities,omitempty"`
-	Host           string          `json:"host"`
-	IP             string          `json:"ip"`
-	Created        string          `json:"created"`
-	Expires        string          `json:"expires"`
-	EnrollmentHash string          `json:"enrollment_hash,omitempty"`
-	TokenHash      string          `json:"token_hash,omitempty"`
-	MachineID      string          `json:"machine_id,omitempty"`
-	LastSeen       string          `json:"last_seen,omitempty"`
-	Version        string          `json:"version,omitempty"`
-	Desired        string          `json:"desired"`
-	Applied        string          `json:"applied,omitempty"`
-	PublicKey      string          `json:"public_key,omitempty"`
-	HostKeys       []string        `json:"host_keys,omitempty"`
-	Message        string          `json:"message,omitempty"`
-	Probe          *agentHostProbe `json:"probe,omitempty"`
+	ID             string                 `json:"id"`
+	Job            string                 `json:"job,omitempty"`
+	Cluster        string                 `json:"cluster,omitempty"`
+	Clusters       []string               `json:"clusters,omitempty"`
+	ClusterModes   map[string]string      `json:"cluster_modes,omitempty"`
+	Node           string                 `json:"node,omitempty"`
+	Mode           string                 `json:"mode,omitempty"` // "" / "ssh_trust" | "direct" (direct execution without SSH/control host)
+	Disabled       bool                   `json:"disabled,omitempty"`
+	AllowMutating  bool                   `json:"allow_mutating,omitempty"`
+	Capabilities   []string               `json:"capabilities,omitempty"`
+	Host           string                 `json:"host"`
+	IP             string                 `json:"ip"`
+	Created        string                 `json:"created"`
+	Expires        string                 `json:"expires"`
+	EnrollmentHash string                 `json:"enrollment_hash,omitempty"`
+	TokenHash      string                 `json:"token_hash,omitempty"`
+	MachineID      string                 `json:"machine_id,omitempty"`
+	LastSeen       string                 `json:"last_seen,omitempty"`
+	Version        string                 `json:"version,omitempty"`
+	Desired        string                 `json:"desired"`
+	Applied        string                 `json:"applied,omitempty"`
+	PublicKey      string                 `json:"public_key,omitempty"`
+	HostKeys       []string               `json:"host_keys,omitempty"`
+	Message        string                 `json:"message,omitempty"`
+	Probe          *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats     []agentHeartbeatSample `json:"heartbeats,omitempty"`
 }
 
 func targetAgentClusters(a targetAgent) []string {
@@ -530,6 +577,7 @@ func (s *storeServer) handleTargetAgent(w http.ResponseWriter, r *http.Request) 
 	if p := sanitizeAgentHostProbe(req.Probe); p != nil {
 		a.Probe = p
 	}
+	a.Heartbeats = appendAgentHeartbeat(a.Heartbeats, a.LastSeen, a.Probe)
 	n := d.Nodes[a.Node]
 	if a.Mode != "direct" {
 		if a.Desired == "active" && !targetAgentInScope(a, n) {

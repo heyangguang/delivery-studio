@@ -2610,4 +2610,8 @@ body[arco-theme="dark"] .wide-plans button.wide-plan-tile:hover:not(:disabled) {
   font-weight: 550;
   line-height: 18px;
   white-space: nowrap;
+  vertical-align: -1px;
+}
+.cl-ro-chip::before {
+  content: none !important;
 }

@@ -24,38 +24,28 @@ import (
 // when an Agent runs on a jumpbox/management host, tasks execute over SSH or Ansible.
 
 type unifiedAgentView struct {
-	ID                string            `json:"id"`
-	Backing           string            `json:"backing"` // "node" | "direct"
-	Name              string            `json:"name"`
-	IP                string            `json:"ip"`
-	Online            bool              `json:"online"`
-	Disabled          bool              `json:"disabled"`
-	Revoked           bool              `json:"revoked,omitempty"`
-	LastSeen          string            `json:"last_seen,omitempty"`
-	Version           string            `json:"version,omitempty"`
-	Protocol          int               `json:"protocol,omitempty"`
-	SupportsExec      bool              `json:"supports_exec"`
-	ClusterModes      map[string]string `json:"cluster_modes"`
-	Clusters          []string          `json:"clusters"`
-	SuggestedClusters []string          `json:"suggested_clusters,omitempty"`
-	Probe             *agentHostProbe   `json:"probe,omitempty"`
-	ServiceName       string            `json:"service_name,omitempty"`
-}
-
-type iamAgentBrief struct {
-	ID       string `json:"id"`
-	Backing  string `json:"backing"`
-	Name     string `json:"name"`
-	IP       string `json:"ip"`
-	Online   bool   `json:"online"`
-	Disabled bool   `json:"disabled"`
+	ID                string                 `json:"id"`
+	Backing           string                 `json:"backing"` // "node" | "direct"
+	Name              string                 `json:"name"`
+	IP                string                 `json:"ip"`
+	Online            bool                   `json:"online"`
+	Disabled          bool                   `json:"disabled"`
+	Revoked           bool                   `json:"revoked,omitempty"`
+	LastSeen          string                 `json:"last_seen,omitempty"`
+	Version           string                 `json:"version,omitempty"`
+	Protocol          int                    `json:"protocol,omitempty"`
+	SupportsExec      bool                   `json:"supports_exec"`
+	ClusterModes      map[string]string      `json:"cluster_modes"`
+	Clusters          []string               `json:"clusters"`
+	SuggestedClusters []string               `json:"suggested_clusters,omitempty"`
+	Probe             *agentHostProbe        `json:"probe,omitempty"`
+	Heartbeats        []agentHeartbeatSample `json:"heartbeats,omitempty"`
+	ServiceName       string                 `json:"service_name,omitempty"`
 }
 
 func normalizeAgentClusterMode(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "readonly", "ro", "view":
-		return "readonly", true
-	case "readwrite", "rw", "operate":
+	case "readonly", "ro", "view", "readwrite", "rw", "operate", "bound", "true", "1":
 		return "readwrite", true
 	default:
 		return "", false
@@ -72,10 +62,11 @@ func cleanAgentClusterModes(in map[string]string) (map[string]string, bool) {
 		if cid == "" || len(cid) > 120 || !docClusterID.MatchString(cid) {
 			return nil, false
 		}
-		if strings.TrimSpace(rawMode) == "" {
+		trimmed := strings.TrimSpace(rawMode)
+		if trimmed == "" || strings.EqualFold(trimmed, "disabled") || strings.EqualFold(trimmed, "none") || strings.EqualFold(trimmed, "false") {
 			continue
 		}
-		m, ok := normalizeAgentClusterMode(rawMode)
+		m, ok := normalizeAgentClusterMode(trimmed)
 		if !ok {
 			return nil, false
 		}
@@ -108,20 +99,16 @@ func effectiveNodeClusterModes(n executionNode) map[string]string {
 			out[strings.TrimSpace(cid)] = m
 		}
 	}
-	defaultMode := "readonly"
-	if nodeAllowsRehearsal(n) || nodeAllowsDelivery(n) {
-		defaultMode = "readwrite"
-	}
 	for _, cid := range n.Clusters {
 		cid = strings.TrimSpace(cid)
 		if cid != "" && out[cid] == "" {
-			out[cid] = defaultMode
+			out[cid] = "readwrite"
 		}
 	}
 	for cid := range n.Grants {
 		cid = strings.TrimSpace(cid)
 		if cid != "" && out[cid] == "" {
-			out[cid] = defaultMode
+			out[cid] = "readwrite"
 		}
 	}
 	return out
@@ -139,26 +126,43 @@ func applyNodeClusterModes(n *executionNode, modes map[string]string) {
 	if len(modes) == 0 {
 		n.ClusterModes = nil
 		n.Clusters = []string{}
-	} else {
-		cp := make(map[string]string, len(modes))
-		hasRW := false
-		for k, v := range modes {
-			if m, ok := normalizeAgentClusterMode(v); ok && strings.TrimSpace(k) != "" {
-				cp[strings.TrimSpace(k)] = m
-				if m == "readwrite" {
-					hasRW = true
-				}
+		n.Grants = nil
+		return
+	}
+	cp := make(map[string]string, len(modes))
+	hasRW := false
+	for k, v := range modes {
+		if m, ok := normalizeAgentClusterMode(v); ok && strings.TrimSpace(k) != "" {
+			cp[strings.TrimSpace(k)] = m
+			if m == "readwrite" {
+				hasRW = true
 			}
 		}
-		n.ClusterModes = cp
-		n.Clusters = sortedMapKeys(cp)
-		t := true
-		n.AllowProbe = &t
-		if hasRW {
-			t1, t2 := true, true
-			n.AllowRehearsal = &t1
-			n.AllowDelivery = &t2
+	}
+	if len(cp) == 0 {
+		n.ClusterModes = nil
+		n.Clusters = []string{}
+		n.Grants = nil
+		return
+	}
+	n.ClusterModes = cp
+	n.Clusters = sortedMapKeys(cp)
+	if len(n.Grants) > 0 {
+		for cid := range n.Grants {
+			if cp[strings.TrimSpace(cid)] == "" {
+				delete(n.Grants, cid)
+			}
 		}
+		if len(n.Grants) == 0 {
+			n.Grants = nil
+		}
+	}
+	t := true
+	n.AllowProbe = &t
+	if hasRW {
+		t1, t2 := true, true
+		n.AllowRehearsal = &t1
+		n.AllowDelivery = &t2
 	}
 }
 
@@ -169,14 +173,10 @@ func effectiveTargetAgentClusterModes(a targetAgent) map[string]string {
 			out[strings.TrimSpace(cid)] = m
 		}
 	}
-	defaultMode := "readonly"
-	if a.AllowMutating {
-		defaultMode = "readwrite"
-	}
 	for _, cid := range targetAgentClusters(a) {
 		cid = strings.TrimSpace(cid)
 		if cid != "" && out[cid] == "" {
-			out[cid] = defaultMode
+			out[cid] = "readwrite"
 		}
 	}
 	return out
@@ -254,6 +254,7 @@ func buildUnifiedAgentFromNode(
 		Clusters:          sortedMapKeys(modes),
 		SuggestedClusters: suggestedClustersForIP(n.ControllerIP, ipClusters),
 		Probe:             n.Probe,
+		Heartbeats:        n.Heartbeats,
 		ServiceName:       "middleware-execution",
 	}
 }
@@ -283,6 +284,7 @@ func buildUnifiedAgentFromDirect(
 		Clusters:          sortedMapKeys(modes),
 		SuggestedClusters: suggestedClustersForIP(a.IP, ipClusters),
 		Probe:             a.Probe,
+		Heartbeats:        a.Heartbeats,
 		ServiceName:       "middleware-target-agent-" + a.ID,
 	}
 }
@@ -296,21 +298,13 @@ func listUnifiedAgentsFromDB(
 ) []unifiedAgentView {
 	out := make([]unifiedAgentView, 0, len(d.Nodes)+len(d.Agents))
 	for _, n := range d.Nodes {
-		v := buildUnifiedAgentFromNode(n, canManageGlobal, owners, access, ipClusters)
-		if !canManageGlobal && len(v.Clusters) == 0 {
-			continue
-		}
-		out = append(out, v)
+		out = append(out, buildUnifiedAgentFromNode(n, canManageGlobal, owners, access, ipClusters))
 	}
 	for _, a := range d.Agents {
 		if a.Mode != "direct" || a.Desired == "revoked" {
 			continue
 		}
-		v := buildUnifiedAgentFromDirect(a, canManageGlobal, owners, access, ipClusters)
-		if !canManageGlobal && len(v.Clusters) == 0 {
-			continue
-		}
-		out = append(out, v)
+		out = append(out, buildUnifiedAgentFromDirect(a, canManageGlobal, owners, access, ipClusters))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Disabled != out[j].Disabled {
@@ -355,141 +349,6 @@ func validateAgentClusterModeDiff(
 	return cleaned, 200, ""
 }
 
-// iamReadClusterAgents returns all platform unified agents and a map of clusterID -> (agentID -> mode).
-// Safe to call while holding iamMu as long as s.mu is NOT held (lock order: iamMu -> executionMu).
-func (s *storeServer) iamReadClusterAgents() ([]iamAgentBrief, map[string]map[string]string) {
-	executionMu.Lock()
-	d, err := s.readExecutions()
-	executionMu.Unlock()
-	if err != nil {
-		return []iamAgentBrief{}, map[string]map[string]string{}
-	}
-	agents := make([]iamAgentBrief, 0, len(d.Nodes)+len(d.Agents))
-	byCluster := map[string]map[string]string{}
-
-	for _, n := range d.Nodes {
-		agents = append(agents, iamAgentBrief{
-			ID:       n.ID,
-			Backing:  "node",
-			Name:     n.Name,
-			IP:       n.ControllerIP,
-			Online:   executionOnline(n),
-			Disabled: n.Disabled,
-		})
-		for cid, m := range effectiveNodeClusterModes(n) {
-			if byCluster[cid] == nil {
-				byCluster[cid] = map[string]string{}
-			}
-			byCluster[cid][n.ID] = m
-		}
-	}
-	for _, a := range d.Agents {
-		if a.Mode != "direct" || a.Desired == "revoked" {
-			continue
-		}
-		agents = append(agents, iamAgentBrief{
-			ID:       a.ID,
-			Backing:  "direct",
-			Name:     a.Host,
-			IP:       a.IP,
-			Online:   targetAgentOnline(a),
-			Disabled: a.Disabled,
-		})
-		for cid, m := range effectiveTargetAgentClusterModes(a) {
-			if byCluster[cid] == nil {
-				byCluster[cid] = map[string]string{}
-			}
-			byCluster[cid][a.ID] = m
-		}
-	}
-	sort.Slice(agents, func(i, j int) bool {
-		if agents[i].Disabled != agents[j].Disabled {
-			return !agents[i].Disabled
-		}
-		if agents[i].Online != agents[j].Online {
-			return agents[i].Online
-		}
-		return strings.ToLower(agents[i].Name) < strings.ToLower(agents[j].Name)
-	})
-	return agents, byCluster
-}
-
-// iamWriteClusterAgents atomically updates all Agent grants for a single cluster `cid`.
-func (s *storeServer) iamWriteClusterAgents(cid string, raw map[string]string) (string, int) {
-	want := map[string]string{}
-	for rawID, rawMode := range raw {
-		aid := strings.TrimSpace(rawID)
-		if aid == "" {
-			continue
-		}
-		if strings.TrimSpace(rawMode) == "" {
-			continue
-		}
-		m, ok := normalizeAgentClusterMode(rawMode)
-		if !ok {
-			return "无效的 Agent 集群权限级别：" + rawMode, 400
-		}
-		want[aid] = m
-	}
-
-	executionMu.Lock()
-	defer executionMu.Unlock()
-	d, err := s.readExecutions()
-	if err != nil {
-		return err.Error(), 500
-	}
-	for aid := range want {
-		_, inNodes := d.Nodes[aid]
-		a, inAgents := d.Agents[aid]
-		if !inNodes && (!inAgents || a.Mode != "direct" || a.Desired == "revoked") {
-			return "指定的 Agent 不存在或已失效：" + aid, 400
-		}
-	}
-
-	changed := false
-	for id, n := range d.Nodes {
-		modes := effectiveNodeClusterModes(n)
-		cur := modes[cid]
-		next := want[id]
-		if cur == next {
-			continue
-		}
-		if next == "" {
-			delete(modes, cid)
-		} else {
-			modes[cid] = next
-		}
-		applyNodeClusterModes(&n, modes)
-		d.Nodes[id] = n
-		changed = true
-	}
-	for id, a := range d.Agents {
-		if a.Mode != "direct" || a.Desired == "revoked" {
-			continue
-		}
-		modes := effectiveTargetAgentClusterModes(a)
-		cur := modes[cid]
-		next := want[id]
-		if cur == next {
-			continue
-		}
-		if next == "" {
-			delete(modes, cid)
-		} else {
-			modes[cid] = next
-		}
-		applyTargetAgentClusterModes(&a, modes)
-		d.Agents[id] = a
-		changed = true
-	}
-	if changed {
-		if err := s.saveExecutions(d); err != nil {
-			return "保存 Agent 集群授权失败", 500
-		}
-	}
-	return "", 200
-}
-
 func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request, session storeSession) {
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/executions/unified-agents"), "/")
 	if rest == "bundle" && r.Method == "POST" {
@@ -503,11 +362,15 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 
 	lang := reqLang(r)
 	actor := s.accessOf(session.User)
-	canManageGlobal := actor.can("execution.manage") || actor.can("iam.user")
+	canManageGlobal := actor.can("execution.manage")
+	if !canManageGlobal && !actor.can("delivery.view") {
+		s.failBi(w, 403, "需要集群查看或执行节点管理权限", "Permission required to view Execution Agents")
+		return
+	}
 	access := s.clusterAccess(session.User)
 	owners := s.clusterOwners()
 	actorCanOp := func(cid string) bool {
-		return access(owners[cid], cid) == "operate"
+		return canManageGlobal || access(owners[cid], cid) == "operate"
 	}
 	var ipClusters map[string][]string
 	if r.Method == "GET" || r.Method == "POST" || r.Method == "PATCH" {
@@ -531,9 +394,17 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 	switch r.Method {
 	case "GET":
 		list := listUnifiedAgentsFromDB(d, canManageGlobal, owners, access, ipClusters)
+		manageable := make([]string, 0, len(owners))
+		for cid := range owners {
+			if actorCanOp(cid) {
+				manageable = append(manageable, cid)
+			}
+		}
+		sort.Strings(manageable)
 		s.writeJSON(w, 200, map[string]any{
-			"agents":    list,
-			"bootstrap": s.executionBootstrapInfo(r),
+			"agents":              list,
+			"manageable_clusters": manageable,
+			"bootstrap":           s.executionBootstrapInfo(r),
 		})
 
 	case "POST":
@@ -607,11 +478,13 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 
 	case "PATCH":
 		var req struct {
-			ID           string             `json:"id"`
-			Name         *string            `json:"name"`
-			Disabled     *bool              `json:"disabled"`
-			ClusterModes *map[string]string `json:"cluster_modes"`
-			SetCluster   *struct {
+			ID             string             `json:"id"`
+			Name           *string            `json:"name"`
+			Disabled       *bool              `json:"disabled"`
+			ClusterModes   *map[string]string `json:"cluster_modes"`
+			BindClusters   []string           `json:"bind_clusters"`
+			UnbindClusters []string           `json:"unbind_clusters"`
+			SetCluster     *struct {
 				ClusterID string `json:"cluster_id"`
 				Mode      string `json:"mode"` // "" | "readonly" | "readwrite"
 			} `json:"set_cluster"`
@@ -624,6 +497,89 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 		if (req.Disabled != nil || req.Name != nil) && !canManageGlobal {
 			s.failBi(w, 403, "启用/禁用或重命名 Agent 需要管理权限", "Enabling/disabling or renaming an Agent requires management permission")
 			return
+		}
+
+		for _, raw := range req.BindClusters {
+			cid := strings.TrimSpace(raw)
+			if cid == "" {
+				continue
+			}
+			if _, exists := owners[cid]; !exists {
+				s.fail(w, 404, tr(lang, "指定的集群不存在："+cid, "Cluster not found: "+cid))
+				return
+			}
+			if !actorCanOp(cid) {
+				s.fail(w, 403, tr(lang, "无权将集群「"+cid+"」关联到此 Agent", "No operate permission on cluster: "+cid))
+				return
+			}
+		}
+		for _, raw := range req.UnbindClusters {
+			cid := strings.TrimSpace(raw)
+			if cid == "" {
+				continue
+			}
+			if _, exists := owners[cid]; !exists {
+				s.fail(w, 404, tr(lang, "指定的集群不存在："+cid, "Cluster not found: "+cid))
+				return
+			}
+			if !actorCanOp(cid) {
+				s.fail(w, 403, tr(lang, "无权解除集群「"+cid+"」的 Agent 关联", "No operate permission to unbind cluster: "+cid))
+				return
+			}
+		}
+
+		computeTargetModes := func(oldModes map[string]string) (map[string]string, bool) {
+			if req.ClusterModes != nil {
+				if canManageGlobal {
+					return *req.ClusterModes, true
+				}
+				merged := cloneStringMap(oldModes)
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				for cid := range oldModes {
+					if access(owners[cid], cid) != "" {
+						delete(merged, cid)
+					}
+				}
+				for cid, m := range *req.ClusterModes {
+					merged[cid] = m
+				}
+				return merged, true
+			}
+			if len(req.BindClusters) > 0 || len(req.UnbindClusters) > 0 {
+				merged := cloneStringMap(oldModes)
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				for _, raw := range req.BindClusters {
+					cid := strings.TrimSpace(raw)
+					if cid != "" {
+						merged[cid] = "readwrite"
+					}
+				}
+				for _, raw := range req.UnbindClusters {
+					cid := strings.TrimSpace(raw)
+					if cid != "" {
+						delete(merged, cid)
+					}
+				}
+				return merged, true
+			}
+			if req.SetCluster != nil {
+				cid := strings.TrimSpace(req.SetCluster.ClusterID)
+				merged := cloneStringMap(oldModes)
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				if strings.TrimSpace(req.SetCluster.Mode) == "" || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "disabled") || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "none") {
+					delete(merged, cid)
+				} else {
+					merged[cid] = req.SetCluster.Mode
+				}
+				return merged, true
+			}
+			return nil, false
 		}
 
 		if n, ok := d.Nodes[id]; ok {
@@ -639,25 +595,7 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 				n.Disabled = *req.Disabled
 			}
 			oldModes := effectiveNodeClusterModes(n)
-			var targetModes map[string]string
-			hasModeChange := false
-			if req.ClusterModes != nil {
-				targetModes = *req.ClusterModes
-				hasModeChange = true
-			} else if req.SetCluster != nil {
-				cid := strings.TrimSpace(req.SetCluster.ClusterID)
-				targetModes = cloneStringMap(oldModes)
-				if targetModes == nil {
-					targetModes = map[string]string{}
-				}
-				if strings.TrimSpace(req.SetCluster.Mode) == "" || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "disabled") || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "none") {
-					delete(targetModes, cid)
-				} else {
-					targetModes[cid] = req.SetCluster.Mode
-				}
-				hasModeChange = true
-			}
-			if hasModeChange {
+			if targetModes, hasModeChange := computeTargetModes(oldModes); hasModeChange {
 				cleaned, code, errMsg := validateAgentClusterModeDiff(lang, owners, actorCanOp, oldModes, targetModes)
 				if errMsg != "" {
 					s.fail(w, code, errMsg)
@@ -688,25 +626,7 @@ func (s *storeServer) handleUnifiedAgents(w http.ResponseWriter, r *http.Request
 				a.Disabled = *req.Disabled
 			}
 			oldModes := effectiveTargetAgentClusterModes(a)
-			var targetModes map[string]string
-			hasModeChange := false
-			if req.ClusterModes != nil {
-				targetModes = *req.ClusterModes
-				hasModeChange = true
-			} else if req.SetCluster != nil {
-				cid := strings.TrimSpace(req.SetCluster.ClusterID)
-				targetModes = cloneStringMap(oldModes)
-				if targetModes == nil {
-					targetModes = map[string]string{}
-				}
-				if strings.TrimSpace(req.SetCluster.Mode) == "" || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "disabled") || strings.EqualFold(strings.TrimSpace(req.SetCluster.Mode), "none") {
-					delete(targetModes, cid)
-				} else {
-					targetModes[cid] = req.SetCluster.Mode
-				}
-				hasModeChange = true
-			}
-			if hasModeChange {
+			if targetModes, hasModeChange := computeTargetModes(oldModes); hasModeChange {
 				cleaned, code, errMsg := validateAgentClusterModeDiff(lang, owners, actorCanOp, oldModes, targetModes)
 				if errMsg != "" {
 					s.fail(w, code, errMsg)

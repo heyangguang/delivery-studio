@@ -311,16 +311,11 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 			return
 		}
 		var in struct {
-			Users  *map[string]string `json:"users"`
-			Teams  *map[string]string `json:"teams"`
-			Agents *map[string]string `json:"agents"`
+			Users *map[string]string `json:"users"`
+			Teams *map[string]string `json:"teams"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
 			s.fail(w, 400, "提交的内容有问题，请刷新页面后重试")
-			return
-		}
-		if in.Agents != nil && !actor.can("execution.manage") && !actor.can("iam.user") && !actor.can("iam.team") {
-			s.fail(w, 403, "没有调整集群 Agent 权限的许可")
 			return
 		}
 		if in.Users != nil {
@@ -405,12 +400,6 @@ func (s *storeServer) handleIAM(w http.ResponseWriter, r *http.Request, session 
 					}
 					st.Teams[i].Clusters[cid] = nextLvl
 				}
-			}
-		}
-		if in.Agents != nil {
-			if msg, code := s.iamWriteClusterAgents(cid, *in.Agents); msg != "" {
-				s.fail(w, code, msg)
-				return
 			}
 		}
 		save(st, "iam-cluster-grant", cid)
@@ -523,7 +512,6 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 			clusterTeams[cid][t.ID] = lvl
 		}
 	}
-	iamAgents, clusterAgents := s.iamReadClusterAgents()
 	type iamClusterView struct {
 		ID           string            `json:"id"`
 		AppID        string            `json:"app_id"`
@@ -534,7 +522,6 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 		Created      string            `json:"created"`
 		Users        map[string]string `json:"users"`
 		Teams        map[string]string `json:"teams"`
-		Agents       map[string]string `json:"agents"`
 	}
 	clusters := []iamClusterView{}
 	for cid, jobs := range byCluster {
@@ -569,7 +556,6 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 			Created:      first.Created,
 			Users:        nonNilStringMap(clusterUsers[cid]),
 			Teams:        nonNilStringMap(clusterTeams[cid]),
-			Agents:       nonNilStringMap(clusterAgents[cid]),
 		})
 	}
 	sort.Slice(clusters, func(i, j int) bool {
@@ -593,7 +579,7 @@ func (s *storeServer) iamView(st iamState, actorCanOp func(string) bool) map[str
 		deleted[i].Jobs = n
 	}
 	s.mu.Unlock()
-	return map[string]any{"perms": perms, "roles": roles, "teams": teams, "grants": grants, "clusters": clusters, "agents": iamAgents, "deleted": deleted}
+	return map[string]any{"perms": perms, "roles": roles, "teams": teams, "grants": grants, "clusters": clusters, "deleted": deleted}
 }
 
 // setGrant changes what one person holds, within what the actor may hand out.

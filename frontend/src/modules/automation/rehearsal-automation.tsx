@@ -6,22 +6,24 @@ import {
   InputNumber,
   Message,
   Modal,
-  Popover,
   Select,
   Skeleton,
 } from "@arco-design/web-react";
 import {
   IconCheckCircle,
+  IconClose,
   IconCloseCircle,
   IconCopy,
   IconDown,
-  IconExclamationCircle,
+  IconLeft,
   IconLoading,
   IconPlayArrow,
   IconPlus,
   IconRecordStop,
   IconRefresh,
+  IconRight,
   IconSafe,
+  IconSearch,
   IconSettings,
   IconThunderbolt,
   IconUp,
@@ -29,10 +31,7 @@ import {
 import { go } from "../../app/router";
 import { api, can, copy, err } from "../../shared/shared";
 import { bi, useLang } from "../../app/i18n";
-import { invalidateIAMCache } from "../iam/iam";
-import { AgentModeSwitch } from "./execution-nodes";
 import {
-  AgentClusterMode,
   ClusterAutomationHost,
   ClusterAutomationSummary,
   RehearsalExecTarget,
@@ -245,9 +244,8 @@ export function navigateToClusterAutomation(
 }
 
 /**
- * Crisp on-demand Execution Agent Picker Modal (replaces the legacy 3-step setup wizard).
- * Pre-selects the cluster's remembered `last_agent_id`, validates `readonly` vs `readwrite`,
- * and automatically distinguishes local passwordless execution from jumpbox SSH/Ansible.
+ * On-demand Execution Agent Picker Modal.
+ * Picks from Agents associated with this cluster; execution permission is governed cleanly by the user's IAM access.
  */
 export function SelectExecutionAgentModal({
   visible,
@@ -273,8 +271,8 @@ export function SelectExecutionAgentModal({
   onSummaryUpdated?: (next: ClusterAutomationSummary) => void;
 }) {
   useLang();
-  const canGrant = can("execution.manage|iam.user|iam.team");
-  const canEnroll = can("execution.manage");
+  const canBindCluster = can("delivery.execute|delivery.create|execution.manage");
+  const canEnrollAgent = can("execution.manage");
 
   const [summary, setSummary] = useState<ClusterAutomationSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -284,7 +282,7 @@ export function SelectExecutionAgentModal({
   const [sshUser, setSshUser] = useState("root");
   const [sshPort, setSshPort] = useState(22);
   const [execMethod, setExecMethod] = useState<"auto" | "ansible" | "ssh">("auto");
-  const [grantBusy, setGrantBusy] = useState("");
+  const [bindBusy, setBindBusy] = useState("");
 
   const refreshSummary = useCallback(async () => {
     setLoading(true);
@@ -307,15 +305,9 @@ export function SelectExecutionAgentModal({
           : allHosts.map((h) => h.ip);
       setSelectedIPs(initIPs);
 
-      // Pre-select remembered last_agent_id if eligible, else first online eligible Agent
       const bound = res.unified_agents || [];
-      const isEligible = (a: UnifiedAgentView) => {
-        if (a.disabled || !a.online || !a.supports_exec) return false;
-        const m = a.cluster_modes?.[clusterId];
-        if (!m) return false;
-        if (!readOnly && m !== "readwrite") return false;
-        return true;
-      };
+      const isEligible = (a: UnifiedAgentView) =>
+        !a.disabled && a.online && a.supports_exec;
       const remembered = res.last_agent_id || "";
       if (remembered && bound.some((a) => a.id === remembered && isEligible(a))) {
         setSelectedAgentId(remembered);
@@ -328,7 +320,7 @@ export function SelectExecutionAgentModal({
     } finally {
       setLoading(false);
     }
-  }, [clusterId, readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clusterId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!visible) return;
@@ -350,33 +342,23 @@ export function SelectExecutionAgentModal({
     [summary?.available_agents],
   );
 
-  // Check if multiple direct-only agents cover multiple selected hosts
   const directCoverageCount = useMemo(() => {
     if (selectedIPs.length <= 1) return 0;
     let covered = 0;
     for (const ip of selectedIPs) {
       const ok = boundAgents.some(
-        (a) =>
-          a.backing === "direct" &&
-          a.ip === ip &&
-          a.online &&
-          !a.disabled &&
-          (readOnly || a.cluster_modes?.[clusterId] === "readwrite"),
+        (a) => a.backing === "direct" && a.ip === ip && a.online && !a.disabled,
       );
       if (ok) covered++;
     }
     return covered;
-  }, [boundAgents, selectedIPs, readOnly, clusterId]);
+  }, [boundAgents, selectedIPs]);
 
   const pickedAgent = useMemo(
     () => boundAgents.find((a) => a.id === selectedAgentId) || null,
     [boundAgents, selectedAgentId],
   );
 
-  const pickedMode = pickedAgent?.cluster_modes?.[clusterId] || "readonly";
-  const pickedPermBlocked = Boolean(
-    pickedAgent && !readOnly && pickedMode !== "readwrite",
-  );
   const pickedCanRun =
     selectedAgentId === "__direct__"
       ? directCoverageCount === selectedIPs.length && selectedIPs.length > 0
@@ -384,8 +366,7 @@ export function SelectExecutionAgentModal({
           pickedAgent &&
             pickedAgent.online &&
             !pickedAgent.disabled &&
-            pickedAgent.supports_exec &&
-            !pickedPermBlocked,
+            pickedAgent.supports_exec,
         );
 
   const isLocalDirect = useMemo(() => {
@@ -398,29 +379,24 @@ export function SelectExecutionAgentModal({
     );
   }, [selectedAgentId, pickedAgent, selectedIPs]);
 
-  const quickGrantAgent = async (agentId: string, mode: AgentClusterMode) => {
-    if (grantBusy) return;
-    setGrantBusy(agentId);
+  const quickBindAgent = async (agentId: string) => {
+    if (bindBusy) return;
+    setBindBusy(agentId);
     try {
       await api("/api/executions/unified-agents", {
         method: "PATCH",
         body: JSON.stringify({
           id: agentId,
-          set_cluster: { cluster_id: clusterId, mode },
+          bind_clusters: [clusterId],
         }),
       });
-      invalidateIAMCache();
       await refreshSummary();
       setSelectedAgentId(agentId);
-      Message.success(
-        mode === "readwrite"
-          ? bi("已授权该 Agent 读写权限", "Granted Read-Write to Agent")
-          : bi("已授权该 Agent 只读权限", "Granted Read-Only to Agent"),
-      );
+      Message.success(bi("已关联该 Agent", "Associated Agent"));
     } catch (e) {
       err(e);
     } finally {
-      setGrantBusy("");
+      setBindBusy("");
     }
   };
 
@@ -463,8 +439,8 @@ export function SelectExecutionAgentModal({
           <span className="sea-task-name">{taskTitle}</span>
           <span className={`sea-kind-badge ${readOnly ? "is-ro" : "is-rw"}`}>
             {readOnly
-              ? bi("只读采集（需只读或读写 Agent）", "Read-Only Task")
-              : bi("变更操作（需读写 Agent）", "Read-Write Task")}
+              ? bi("100% 只读采集", "Read-Only Probe")
+              : bi("变更步骤执行", "Change Step")}
           </span>
         </div>
 
@@ -474,31 +450,33 @@ export function SelectExecutionAgentModal({
           <>
             <div className="sea-sec">
               <div className="sea-sec-head">
-                <b>{bi("1. 选择本集群已启用的 Agent", "1. Authorized Cluster Agents")}</b>
-                <button
-                  type="button"
-                  className="iam-text-act"
-                  onClick={() => {
-                    onCancel();
-                    go({ name: "accounts", id: "~clusters" });
-                  }}
-                >
-                  {bi("管理集群权限 →", "Cluster Permissions →")}
-                </button>
+                <b>{bi("1. 选择本集群关联的 Agent", "1. Associated Cluster Agents")}</b>
+                {canBindCluster && (
+                  <button
+                    type="button"
+                    className="iam-text-act"
+                    onClick={() => {
+                      onCancel();
+                      go({ name: "executions", view: "nodes" });
+                    }}
+                  >
+                    {bi("前往 Agent 关联集群 →", "Associate in Agent →")}
+                  </button>
+                )}
               </div>
 
               {boundAgents.length === 0 ? (
                 <div className="sea-empty-box">
                   <p>
                     {bi(
-                      `集群「${clusterId}」尚未启用任何执行 Agent。`,
-                      `No Agent is authorized for cluster "${clusterId}" yet.`,
+                      `集群「${clusterId}」尚未关联执行 Agent。`,
+                      `No Agent is associated with cluster "${clusterId}" yet.`,
                     )}
                   </p>
-                  {canGrant && availableAgents.length > 0 && (
+                  {canBindCluster && availableAgents.length > 0 && (
                     <div className="sea-quick-bind">
                       <span className="small faint">
-                        {bi("一键启用已有 Agent：", "Quickly authorize an existing Agent:")}
+                        {bi("一键关联已有 Agent：", "Associate an existing Agent:")}
                       </span>
                       <div className="sea-quick-bind-list">
                         {availableAgents.map((a) => (
@@ -513,24 +491,17 @@ export function SelectExecutionAgentModal({
                             <Button
                               size="mini"
                               type="primary"
-                              loading={grantBusy === a.id}
-                              onClick={() =>
-                                void quickGrantAgent(
-                                  a.id,
-                                  readOnly ? "readonly" : "readwrite",
-                                )
-                              }
+                              loading={bindBusy === a.id}
+                              onClick={() => void quickBindAgent(a.id)}
                             >
-                              {readOnly
-                                ? bi("启用（只读）", "Enable RO")
-                                : bi("启用（读写）", "Enable RW")}
+                              {bi("关联此集群", "Associate")}
                             </Button>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
-                  {canEnroll && (
+                  {canEnrollAgent && (
                     <Button
                       size="small"
                       type="outline"
@@ -545,7 +516,7 @@ export function SelectExecutionAgentModal({
                         go({ name: "executions", view: "nodes" });
                       }}
                     >
-                      {bi("前往执行中心接入新 Agent", "Enroll New Agent")}
+                      {bi("接入新 Agent", "Enroll New Agent")}
                     </Button>
                   )}
                 </div>
@@ -565,7 +536,7 @@ export function SelectExecutionAgentModal({
                     >
                       <div className="sea-agent-main">
                         <span className="iam-ag-dot is-online" />
-                        <b>{bi("各目标节点本机 Agent 自动匹配", "Per-Host Local Agents")}</b>
+                        <b>{bi("各目标节点本机 Agent 直连", "Per-Host Local Agents")}</b>
                         <span className="ua-path-badge is-local">
                           {bi(
                             `${directCoverageCount}/${selectedIPs.length} 台就绪`,
@@ -577,10 +548,8 @@ export function SelectExecutionAgentModal({
                   )}
 
                   {boundAgents.map((a) => {
-                    const mode = a.cluster_modes?.[clusterId] || "readonly";
-                    const roBlocked = !readOnly && mode !== "readwrite";
                     const unusable =
-                      a.disabled || !a.online || !a.supports_exec || roBlocked;
+                      a.disabled || !a.online || !a.supports_exec;
                     const isLocal =
                       a.backing === "direct" ||
                       hosts.some((h) => h.ip.trim() === a.ip.trim());
@@ -611,29 +580,12 @@ export function SelectExecutionAgentModal({
                           >
                             {isLocal
                               ? bi("本机免密直连", "Local Direct")
-                              : bi("远程代管", "Jumpbox")}
+                              : bi("SSH 远程代管", "Jumpbox")}
                           </span>
                         </div>
                         <div className="sea-agent-right">
-                          <span
-                            className={`iam-lvl-tag is-${mode === "readwrite" ? "operate" : "view"}`}
-                          >
-                            {mode === "readwrite"
-                              ? bi("读写", "RW")
-                              : bi("只读", "RO")}
-                          </span>
-                          {roBlocked && canGrant && (
-                            <Button
-                              size="mini"
-                              type="outline"
-                              loading={grantBusy === a.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void quickGrantAgent(a.id, "readwrite");
-                              }}
-                            >
-                              {bi("切为读写", "Set RW")}
-                            </Button>
+                          {a.online && !a.disabled && (
+                            <small className="ok">{bi("在线", "Online")}</small>
                           )}
                           {!a.online && !a.disabled && (
                             <small className="warn">{bi("离线", "Offline")}</small>
@@ -728,6 +680,7 @@ export function SelectExecutionAgentModal({
                       <Select
                         size="small"
                         value={execMethod}
+                        getPopupContainer={() => document.body}
                         onChange={(v) =>
                           setExecMethod(v as "auto" | "ansible" | "ssh")
                         }
@@ -783,24 +736,29 @@ export function SelectExecutionAgentModal({
 
 /**
  * Clean Cluster Automation Panel (under Cluster Detail -> Automation tab).
- * Shows bound cluster Agents (with Enable/Disable & RO/RW switch), 1-click connectivity test,
- * and recent execution logs — with zero 3-step pre-configuration ceremony.
  */
 export function ClusterAutomationPanel({
   clusterId,
+  readOnly = false,
   onChanged,
 }: {
   clusterId: string;
+  readOnly?: boolean;
   onChanged?: (summary: ClusterAutomationSummary) => void;
 }) {
   useLang();
-  const canGrant = can("execution.manage|iam.user|iam.team");
-  const canExec = can("delivery.execute|execution.manage");
+  const canOperateCluster =
+    !readOnly && can("delivery.execute|delivery.create|execution.manage");
+  const canEnrollAgent = can("execution.manage");
+  const canExec = !readOnly && can("delivery.execute|execution.manage");
 
   const [summary, setSummary] = useState<ClusterAutomationSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busyKey, setBusyKey] = useState("");
-  const [addPopOpen, setAddPopOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [leftQ, setLeftQ] = useState("");
+  const [rightQ, setRightQ] = useState("");
+  const [leftChecked, setLeftChecked] = useState<Set<string>>(() => new Set());
+  const [rightChecked, setRightChecked] = useState<Set<string>>(() => new Set());
   const [checkModalOpen, setCheckModalOpen] = useState(false);
   const [checkBusy, setCheckBusy] = useState(false);
   const [liveCheckTask, setLiveCheckTask] = useState<RehearsalExecTask | null>(null);
@@ -824,23 +782,27 @@ export function ClusterAutomationPanel({
     void load(false);
   }, [load]);
 
-  const setAgentMode = async (agentId: string, mode: "" | AgentClusterMode) => {
-    if (busyKey) return;
-    setBusyKey(agentId);
+  const batchSetAgentsBound = async (agentIds: string[], bound: boolean) => {
+    if (busy || agentIds.length === 0) return;
+    setBusy(true);
     try {
-      await api("/api/executions/unified-agents", {
-        method: "PATCH",
-        body: JSON.stringify({
-          id: agentId,
-          set_cluster: { cluster_id: clusterId, mode },
-        }),
-      });
-      invalidateIAMCache();
+      for (const agentId of agentIds) {
+        await api("/api/executions/unified-agents", {
+          method: "PATCH",
+          body: JSON.stringify(
+            bound
+              ? { id: agentId, bind_clusters: [clusterId] }
+              : { id: agentId, unbind_clusters: [clusterId] },
+          ),
+        });
+      }
+      setLeftChecked(new Set());
+      setRightChecked(new Set());
       await load(true);
     } catch (e) {
       err(e);
     } finally {
-      setBusyKey("");
+      setBusy(false);
     }
   };
 
@@ -879,6 +841,20 @@ export function ClusterAutomationPanel({
   const bound = summary?.unified_agents || [];
   const available = summary?.available_agents || [];
   const recent = summary?.recent_tasks || [];
+  const lkw = leftQ.trim().toLowerCase();
+  const rkw = rightQ.trim().toLowerCase();
+  const filteredAvailable = available.filter(
+    (a) => !lkw || a.name.toLowerCase().includes(lkw) || a.ip.toLowerCase().includes(lkw),
+  );
+  const filteredBound = bound.filter(
+    (a) => !rkw || a.name.toLowerCase().includes(rkw) || a.ip.toLowerCase().includes(rkw),
+  );
+  const validLeftChecked = filteredAvailable.filter((a) => leftChecked.has(a.id));
+  const validRightChecked = filteredBound.filter((a) => rightChecked.has(a.id));
+
+  const isLocalAgent = (a: UnifiedAgentView) =>
+    a.backing === "direct" ||
+    Boolean(summary?.hosts?.some((h) => h.ip.trim() === a.ip.trim()));
 
   return (
     <div className="rha-clean-panel">
@@ -886,13 +862,13 @@ export function ClusterAutomationPanel({
         <div className="ua-sec-head">
           <div>
             <h2>
-              {bi("本集群关联的执行 Agent", "Authorized Execution Agents")}{" "}
+              {bi("本集群关联的执行 Agent", "Associated Execution Agents")}{" "}
               <em className="num">{bound.length}</em>
             </h2>
             <p className="faint small">
               {bi(
-                "在集群中点击「执行」时可直接从下方已启用的 Agent 中选择运行；权限与「IAM → 集群权限」实时互通。",
-                "When running probes or change steps in this cluster, pick from enabled Agents below. Synced with IAM → Cluster Permissions.",
+                "在集群中运行只读探针或变更演练步骤时，直接从已关联的 Agent 中选择执行。",
+                "Pick from associated Agents when running probes or change steps in this cluster.",
               )}
             </p>
           </div>
@@ -907,133 +883,323 @@ export function ClusterAutomationPanel({
                 {bi("连通测试", "Test Connectivity")}
               </Button>
             )}
-            {canGrant && available.length > 0 && (
-              <Popover
-                trigger="click"
-                position="br"
-                popupVisible={addPopOpen}
-                onVisibleChange={setAddPopOpen}
-                unmountOnExit
-                content={
-                  <div className="iam-quick-pop">
-                    <div className="iam-quick-pop-head">
-                      <b>{bi("关联已有 Agent", "Authorize Existing Agent")}</b>
-                    </div>
-                    <div className="iam-quick-pop-list">
-                      {available.map((a) => (
-                        <div key={a.id} className="iam-quick-pop-row">
-                          <span className="iam-quick-pop-who">
-                            <span
-                              className={`iam-ag-dot ${a.online && !a.disabled ? "is-online" : "is-offline"}`}
-                            />
-                            <b>{a.name}</b>
-                            <small className="mono faint">{a.ip}</small>
-                          </span>
-                          <span className="iam-quick-pop-btns">
-                            <button
-                              type="button"
-                              className="iam-lvl-tag is-view is-btn"
-                              onClick={() => {
-                                setAddPopOpen(false);
-                                void setAgentMode(a.id, "readonly");
-                              }}
-                            >
-                              {bi("+ 只读", "+ RO")}
-                            </button>
-                            <button
-                              type="button"
-                              className="iam-lvl-tag is-operate is-btn"
-                              onClick={() => {
-                                setAddPopOpen(false);
-                                void setAgentMode(a.id, "readwrite");
-                              }}
-                            >
-                              {bi("+ 读写", "+ RW")}
-                            </button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                }
-              >
-                <Button size="small" type="primary" icon={<IconPlus />}>
-                  {bi("关联 Agent", "Add Agent")}
-                </Button>
-              </Popover>
-            )}
             <Button
               size="small"
               type="outline"
               icon={<IconSettings />}
               onClick={() => {
-                saveAgentEnrollPrefill({
-                  cluster: clusterId,
-                  host: summary?.hosts?.[0]?.name,
-                  ip: summary?.hosts?.[0]?.ip,
-                });
+                if (canEnrollAgent) {
+                  saveAgentEnrollPrefill({
+                    cluster: clusterId,
+                    host: summary?.hosts?.[0]?.name,
+                    ip: summary?.hosts?.[0]?.ip,
+                  });
+                }
                 go({ name: "executions", view: "nodes" });
               }}
             >
-              {bi("接入新 Agent", "Enroll Agent")}
+              {canEnrollAgent
+                ? bi("管理 / 接入 Agent", "Manage Agents")
+                : bi("前往 Agent 中心", "Open Agents")}
             </Button>
           </div>
         </div>
 
-        {bound.length === 0 ? (
+        {canOperateCluster ? (
+          bound.length === 0 && available.length === 0 ? (
+            <div className="ua-cluster-empty">
+              <span className="faint">
+                {canEnrollAgent
+                  ? bi(
+                      "平台尚未接入任何执行 Agent；可前往「执行中心 → Agent」接入机器后再关联。",
+                      "No Agents enrolled on the platform yet.",
+                    )
+                  : bi(
+                      "平台尚未接入可用的执行 Agent，请联系管理员先部署并接入 Agent。",
+                      "No Agents enrolled yet. Contact an administrator.",
+                    )}
+              </span>
+            </div>
+          ) : (
+            <div className="ds-transfer">
+              <div className="ds-tf-pane">
+                <div className="ds-tf-head">
+                  <label className="ds-tf-head-chk">
+                    <Checkbox
+                      checked={
+                        filteredAvailable.length > 0 &&
+                        validLeftChecked.length === filteredAvailable.length
+                      }
+                      indeterminate={
+                        validLeftChecked.length > 0 &&
+                        validLeftChecked.length < filteredAvailable.length
+                      }
+                      disabled={busy || filteredAvailable.length === 0}
+                      onChange={(chk) => {
+                        const next = new Set(leftChecked);
+                        for (const a of filteredAvailable) {
+                          if (chk) next.add(a.id);
+                          else next.delete(a.id);
+                        }
+                        setLeftChecked(next);
+                      }}
+                    />
+                    <b>{bi("可关联 Agent", "Available Agents")}</b>
+                  </label>
+                  <span className="ds-tf-cnt num">
+                    {validLeftChecked.length > 0
+                      ? `${validLeftChecked.length} / ${available.length}`
+                      : available.length}
+                  </span>
+                </div>
+                <div className="ds-tf-search">
+                  <Input
+                    size="small"
+                    prefix={<IconSearch />}
+                    allowClear
+                    value={leftQ}
+                    onChange={setLeftQ}
+                    placeholder={bi("搜索 Agent 名称或机器 IP…", "Search Agent or IP…")}
+                  />
+                </div>
+                <div className="ds-tf-list" style={{ height: 240 }}>
+                  {filteredAvailable.length === 0 ? (
+                    <div className="ds-tf-empty">
+                      {available.length === 0
+                        ? bi("全部可用 Agent 已关联至本集群", "All available Agents are associated")
+                        : bi("无匹配的 Agent", "No matching Agents")}
+                    </div>
+                  ) : (
+                    filteredAvailable.map((a) => {
+                      const checked = leftChecked.has(a.id);
+                      const local = isLocalAgent(a);
+                      return (
+                        <div
+                          key={a.id}
+                          className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                          onClick={() => {
+                            if (busy) return;
+                            const next = new Set(leftChecked);
+                            if (checked) next.delete(a.id);
+                            else next.add(a.id);
+                            setLeftChecked(next);
+                          }}
+                        >
+                          <Checkbox checked={checked} disabled={busy} />
+                          <div className="ds-tf-item-main">
+                            <span
+                              className={`iam-ag-dot ${
+                                a.disabled
+                                  ? "is-disabled"
+                                  : a.online
+                                    ? "is-online"
+                                    : "is-offline"
+                              }`}
+                            />
+                            <b className="ds-tf-id">{a.name}</b>
+                            <code className="mono faint small">{a.ip}</code>
+                            {local && (
+                              <span className="ua-path-badge is-local">
+                                {bi("本机直连", "Direct")}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className="ds-tf-quick-btn"
+                            disabled={busy}
+                            title={bi("立即关联", "Associate")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void batchSetAgentsBound([a.id], true);
+                            }}
+                          >
+                            <IconPlus />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="ds-tf-mid">
+                <Button
+                  type="primary"
+                  size="small"
+                  disabled={busy || validLeftChecked.length === 0}
+                  loading={busy && validLeftChecked.length > 0}
+                  onClick={() =>
+                    void batchSetAgentsBound(
+                      validLeftChecked.map((a) => a.id),
+                      true,
+                    )
+                  }
+                >
+                  {bi("关联", "Add")} <IconRight />
+                </Button>
+                <Button
+                  size="small"
+                  disabled={busy || validRightChecked.length === 0}
+                  loading={busy && validRightChecked.length > 0}
+                  onClick={() =>
+                    void batchSetAgentsBound(
+                      validRightChecked.map((a) => a.id),
+                      false,
+                    )
+                  }
+                >
+                  <IconLeft /> {bi("移除", "Remove")}
+                </Button>
+              </div>
+
+              <div className="ds-tf-pane is-target">
+                <div className="ds-tf-head">
+                  <label className="ds-tf-head-chk">
+                    <Checkbox
+                      checked={
+                        filteredBound.length > 0 &&
+                        validRightChecked.length === filteredBound.length
+                      }
+                      indeterminate={
+                        validRightChecked.length > 0 &&
+                        validRightChecked.length < filteredBound.length
+                      }
+                      disabled={busy || filteredBound.length === 0}
+                      onChange={(chk) => {
+                        const next = new Set(rightChecked);
+                        for (const a of filteredBound) {
+                          if (chk) next.add(a.id);
+                          else next.delete(a.id);
+                        }
+                        setRightChecked(next);
+                      }}
+                    />
+                    <b>{bi("已关联 Agent", "Associated Agents")}</b>
+                  </label>
+                  <span className="ds-tf-cnt is-brand num">
+                    {validRightChecked.length > 0
+                      ? `${validRightChecked.length} / ${bound.length}`
+                      : bound.length}
+                  </span>
+                </div>
+                <div className="ds-tf-search">
+                  <Input
+                    size="small"
+                    prefix={<IconSearch />}
+                    allowClear
+                    value={rightQ}
+                    onChange={setRightQ}
+                    placeholder={bi("筛选已关联 Agent…", "Filter associated Agents…")}
+                  />
+                </div>
+                <div className="ds-tf-list" style={{ height: 240 }}>
+                  {filteredBound.length === 0 ? (
+                    <div className="ds-tf-empty">
+                      {bound.length === 0
+                        ? bi("从左侧勾选要用于本集群执行的 Agent", "Select Agents from the left pane")
+                        : bi("无匹配的已关联 Agent", "No matching Agents")}
+                    </div>
+                  ) : (
+                    filteredBound.map((a) => {
+                      const checked = rightChecked.has(a.id);
+                      const local = isLocalAgent(a);
+                      return (
+                        <div
+                          key={a.id}
+                          className={`ds-tf-row ${checked ? "is-checked" : ""}`}
+                          onClick={() => {
+                            if (busy) return;
+                            const next = new Set(rightChecked);
+                            if (checked) next.delete(a.id);
+                            else next.add(a.id);
+                            setRightChecked(next);
+                          }}
+                        >
+                          <Checkbox checked={checked} disabled={busy} />
+                          <div className="ds-tf-item-main">
+                            <span
+                              className={`iam-ag-dot ${
+                                a.disabled
+                                  ? "is-disabled"
+                                  : a.online
+                                    ? "is-online"
+                                    : "is-offline"
+                              }`}
+                            />
+                            <b className="ds-tf-id">{a.name}</b>
+                            <code className="mono faint small">{a.ip}</code>
+                            <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
+                              {local
+                                ? bi("本机免密直连", "Local Direct")
+                                : bi("SSH 远程代管", "Jumpbox SSH")}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="ds-tf-quick-btn is-rm"
+                            disabled={busy}
+                            title={bi("解除关联", "Unbind")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void batchSetAgentsBound([a.id], false);
+                            }}
+                          >
+                            <IconClose />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        ) : bound.length === 0 ? (
           <div className="ua-cluster-empty">
             <span className="faint">
               {bi(
-                "当前集群尚未关联任何执行 Agent。关联后即可在基线巡检与变更演练中一键选择 Agent 自动执行。",
-                "No Agent authorized for this cluster yet.",
+                "当前集群尚未关联执行 Agent（你对本集群为只读权限，需集群创建者或运维成员配置关联）。",
+                "No Agent associated yet (read-only access on this cluster).",
               )}
             </span>
           </div>
         ) : (
-          <div className="ua-cluster-ledger">
-            {bound.map((a) => {
-              const mode = a.cluster_modes?.[clusterId] || "readonly";
-              const isLocal =
-                a.backing === "direct" ||
-                Boolean(summary?.hosts?.some((h) => h.ip.trim() === a.ip.trim()));
-              return (
-                <div
-                  key={a.id}
-                  className={`ua-cluster-row ${busyKey === a.id ? "is-busy" : ""}`}
-                >
-                  <div className="ua-cluster-info">
-                    <span
-                      className={`iam-ag-dot ${
-                        a.disabled
-                          ? "is-disabled"
-                          : a.online
-                            ? "is-online"
-                            : "is-offline"
-                      }`}
-                    />
-                    <b>{a.name}</b>
-                    <code className="mono faint">{a.ip}</code>
-                    <span className={`ua-path-badge ${isLocal ? "is-local" : ""}`}>
-                      {isLocal
-                        ? bi("本机免密直连", "Local Direct")
-                        : bi("远程代管 (SSH / Ansible)", "Remote Jumpbox")}
-                    </span>
-                    {summary?.last_agent_id === a.id && (
-                      <span className="iam-app-pill">
-                        {bi("上次使用", "Last Used")}
+          <div className="ds-tf-pane">
+            <div className="ds-tf-head">
+              <b style={{ fontSize: 13 }}>{bi("已关联的执行 Agent", "Associated Agents")}</b>
+              <span className="ds-tf-cnt num">{bound.length}</span>
+            </div>
+            <div className="ds-tf-list" style={{ height: "auto", maxHeight: 260 }}>
+              {bound.map((a) => {
+                const local = isLocalAgent(a);
+                return (
+                  <div key={a.id} className="ds-tf-row" style={{ cursor: "default" }}>
+                    <div className="ds-tf-item-main">
+                      <span
+                        className={`iam-ag-dot ${
+                          a.disabled ? "is-disabled" : a.online ? "is-online" : "is-offline"
+                        }`}
+                      />
+                      <b className="ds-tf-id">{a.name}</b>
+                      <code className="mono faint small">{a.ip}</code>
+                      <span className={`ua-path-badge ${local ? "is-local" : ""}`}>
+                        {local
+                          ? bi("本机免密直连", "Local Direct")
+                          : bi("SSH 远程代管", "Jumpbox SSH")}
                       </span>
-                    )}
+                    </div>
+                    <span className="small faint">
+                      {a.disabled
+                        ? bi("已禁用", "Disabled")
+                        : a.online
+                          ? bi("在线", "Online")
+                          : bi("离线", "Offline")}
+                    </span>
                   </div>
-                  <div className="ua-cluster-ctrl">
-                    <AgentModeSwitch
-                      value={mode}
-                      disabled={!canGrant || !!busyKey}
-                      onChange={(next) => void setAgentMode(a.id, next)}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </section>

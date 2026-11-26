@@ -1288,11 +1288,14 @@ function AIStatusBadge({
   const stateCls = on ? "is-on" : pendingCfg ? "is-warn" : "is-off";
   const statusWord = on ? bi("已启用", "Enabled") : pendingCfg ? bi("待配置", "Setup needed") : bi("未启用", "Disabled");
   const shortSub = on ? "" : pendingCfg ? bi(" · 待配", " · Setup") : bi(" · Off", " · Off");
+  const canUseAI = can("ai.use");
   const readonlyTip = on
-    ? bi("平台 AI 套件已启用（当前账户只读，由管理员在平台设置中维护）", "Platform AI suite is enabled (read-only; managed in Platform Settings)")
+    ? canUseAI
+      ? bi("平台 AI 服务已就绪 · 点击打开 AI 助手", "AI Suite is ready · Click to open AI Assistant")
+      : bi("平台 AI 服务已开启（模型参数由管理员维护）", "Platform AI suite is active (managed by administrators)")
     : pendingCfg
-      ? bi("平台 AI 套件待管理员完成模型配置（只读）", "Platform AI suite awaits model setup by an administrator")
-      : bi("平台 AI 套件未启用（当前账户只读，需管理员在平台设置中开启）", "Platform AI suite is disabled (read-only; ask an admin to enable it)");
+      ? bi("平台 AI 模型待管理员完成配置", "Platform AI suite awaits model setup by an administrator")
+      : bi("平台 AI 服务暂未开启（由管理员在平台设置中启用）", "Platform AI suite is disabled (managed in Platform Settings)");
   const warmAISettings = () => {
     if (!cached("/api/settings/ai"))
       void fetchCached("/api/settings/ai").catch(() => undefined);
@@ -1310,12 +1313,29 @@ function AIStatusBadge({
     </>
   );
   if (!canManage) {
+    if (on && canUseAI) {
+      return (
+        <Tooltip mini position="bottom" content={readonlyTip}>
+          <button
+            type="button"
+            className={`ai-quick-toggle is-interactive ${stateCls}`}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              go({ name: "ai" });
+            }}
+            aria-label={bi("打开 AI 助手", "Open AI Assistant")}
+          >
+            {content}
+          </button>
+        </Tooltip>
+      );
+    }
     return (
       <Tooltip mini position="bottom" content={readonlyTip}>
         <span
           className={`ai-quick-toggle is-readonly ${stateCls}`}
           role="status"
-          aria-label={bi(`AI 套件${statusWord}（只读）`, `AI Suite ${statusWord} (read-only)`)}
+          aria-label={bi(`AI 套件${statusWord}`, `AI Suite ${statusWord}`)}
         >
           {content}
         </span>

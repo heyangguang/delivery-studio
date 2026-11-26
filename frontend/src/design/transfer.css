@@ -13,49 +13,6 @@
   justify-content: space-between;
   gap: 8px 12px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-}
-
-.ptf-pills {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px;
-  border-radius: 7px;
-  border: 1px solid var(--line);
-  background: var(--sunken);
-  flex-wrap: wrap;
-}
-
-.ptf-pill {
-  height: 24px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--mute);
-  font: 560 12px/1 var(--sans);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background-color 0.14s ease, color 0.14s ease;
-}
-
-.ptf-pill:hover {
-  color: var(--ink);
-}
-
-.ptf-pill.on {
-  background: var(--surface-raised);
-  color: var(--ink);
-  font-weight: 650;
-  box-shadow: var(--shadow-sm);
-}
-
-.ptf-pill.is-ok.on {
-  color: var(--ok);
 }
 
 .ptf-grid {

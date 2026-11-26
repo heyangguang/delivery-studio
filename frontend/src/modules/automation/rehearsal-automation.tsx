@@ -7,6 +7,7 @@ import {
   Message,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Skeleton,
 } from "@arco-design/web-react";
@@ -1552,27 +1553,22 @@ export function ClusterAutomationPanel({
             )}
             topBar={
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8 }}>
-                <div className="ptf-pills">
-                  <button
-                    type="button"
-                    className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
-                    onClick={() => setScopeFilter("all")}
-                  >
+                <Radio.Group
+                  type="button"
+                  size="small"
+                  value={scopeFilter}
+                  onChange={(v) => setScopeFilter(v as "all" | "online")}
+                >
+                  <Radio value="all">
                     {bi("全部可用", "All")} ({available.length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`ptf-pill is-ok ${
-                      scopeFilter === "online" ? "on" : ""
-                    }`}
-                    onClick={() => setScopeFilter("online")}
-                  >
+                  </Radio>
+                  <Radio value="online">
                     {bi("仅在线", "Online")} ({onlineAvailCount})
-                  </button>
-                </div>
+                  </Radio>
+                </Radio.Group>
                 {canEnrollAgent && (
                   <Button
-                    size="mini"
+                    size="small"
                     type="outline"
                     icon={<IconPlus />}
                     onClick={() => {

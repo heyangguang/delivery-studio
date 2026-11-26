@@ -5,6 +5,7 @@ import {
   Input,
   Message,
   Modal,
+  Radio,
   Select,
 } from "@arco-design/web-react";
 import {
@@ -747,31 +748,26 @@ export function EnrollAgentModal({
                   )}
                   topBar={
                     sameIPUnboundCount > 0 || appOptions.length > 1 ? (
-                      <>
-                        <div className="ptf-pills">
-                          <button
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {sameIPUnboundCount > 0 && (
+                          <Radio.Group
                             type="button"
-                            className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
-                            onClick={() => setScopeFilter("all")}
+                            size="small"
+                            value={scopeFilter}
+                            onChange={(v) => setScopeFilter(v as "all" | "same_ip")}
                           >
-                            {bi("全部", "All")} ({allUnbound.length})
-                          </button>
-                          {sameIPUnboundCount > 0 && (
-                            <button
-                              type="button"
-                              className={`ptf-pill is-ok ${
-                                scopeFilter === "same_ip" ? "on" : ""
-                              }`}
-                              onClick={() => setScopeFilter("same_ip")}
-                            >
+                            <Radio value="all">
+                              {bi("全部", "All")} ({allUnbound.length})
+                            </Radio>
+                            <Radio value="same_ip">
                               {bi("同机 IP", "Same IP")} ({sameIPUnboundCount})
-                            </button>
-                          )}
-                        </div>
+                            </Radio>
+                          </Radio.Group>
+                        )}
                         {appOptions.length > 1 && (
                           <Select
-                            size="mini"
-                            style={{ width: 146 }}
+                            size="small"
+                            style={{ width: 168 }}
                             value={appFilter}
                             onChange={setAppFilter}
                             getPopupContainer={() => document.body}
@@ -785,7 +781,7 @@ export function EnrollAgentModal({
                             ]}
                           />
                         )}
-                      </>
+                      </div>
                     ) : undefined
                   }
                   onAdd={(keys) =>

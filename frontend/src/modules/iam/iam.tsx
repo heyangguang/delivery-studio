@@ -6,6 +6,7 @@ import {
   Input,
   Message,
   Modal,
+  Radio,
   Select,
   Skeleton,
   Switch,
@@ -801,8 +802,8 @@ export function ClusterGrantPicker({
               {bi("按中间件快速筛选未授权集群：", "Filter by middleware:")}
             </span>
             <Select
-              size="mini"
-              style={{ width: 168 }}
+              size="small"
+              style={{ width: 176 }}
               value={appFilter}
               onChange={setAppFilter}
               getPopupContainer={() => document.body}
@@ -2075,25 +2076,22 @@ export function RolesPane({
                       placeholder={bi("搜索权限名称或说明…", "Filter permissions…")}
                     />
                     {locked && (
-                      <span className="iam-lvl-seg" style={{ height: 28 }}>
-                        <button
-                          type="button"
-                          className={!onlyGranted ? "on is-op" : ""}
-                          onClick={() => setOnlyGranted(false)}
-                        >
+                      <Radio.Group
+                        type="button"
+                        size="small"
+                        value={onlyGranted ? "granted" : "all"}
+                        onChange={(v) => setOnlyGranted(v === "granted")}
+                      >
+                        <Radio value="all">
                           {bi(`全部 (${iam.perms.length})`, `All (${iam.perms.length})`)}
-                        </button>
-                        <button
-                          type="button"
-                          className={onlyGranted ? "on is-op" : ""}
-                          onClick={() => setOnlyGranted(true)}
-                        >
+                        </Radio>
+                        <Radio value="granted">
                           {bi(
                             `仅看已具备 (${cur.perms.length})`,
                             `Granted (${cur.perms.length})`,
                           )}
-                        </button>
-                      </span>
+                        </Radio>
+                      </Radio.Group>
                     )}
                   </div>
                 </div>
@@ -4326,26 +4324,16 @@ export function ClustersAccessPane({
                 )}
                 topBar={
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8, flexWrap: "wrap" }}>
-                    <div className="ptf-pills" role="tablist">
-                      {(
-                        [
-                          ["all", bi("全部对象", "All")],
-                          ["users", bi("平台成员", "Users")],
-                          ["teams", bi("协作团队", "Teams")],
-                        ] as const
-                      ).map(([k, lbl]) => (
-                        <button
-                          key={k}
-                          type="button"
-                          role="tab"
-                          aria-selected={drawerKind === k}
-                          className={`ptf-pill ${drawerKind === k ? "on" : ""}`}
-                          onClick={() => setDrawerKind(k)}
-                        >
-                          {lbl}
-                        </button>
-                      ))}
-                    </div>
+                    <Radio.Group
+                      type="button"
+                      size="small"
+                      value={drawerKind}
+                      onChange={(v) => setDrawerKind(v as "all" | "users" | "teams")}
+                    >
+                      <Radio value="all">{bi("全部对象", "All")}</Radio>
+                      <Radio value="users">{bi("平台成员", "Users")}</Radio>
+                      <Radio value="teams">{bi("协作团队", "Teams")}</Radio>
+                    </Radio.Group>
                     <span className="faint small">
                       {bi("穿梭或切换后实时保存生效", "Changes save automatically")}
                     </span>

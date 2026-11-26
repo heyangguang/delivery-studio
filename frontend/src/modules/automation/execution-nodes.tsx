@@ -7,6 +7,7 @@ import {
   Message,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Skeleton,
   Switch,
@@ -781,60 +782,57 @@ function AgentClusterTransferDrawer({
                 : bi("没有符合筛选条件的可关联集群", "No matching clusters")
             }
             topBar={
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <div className="ptf-pills">
-                    <button
-                      type="button"
-                      className={`ptf-pill ${scopeFilter === "all" ? "on" : ""}`}
-                      onClick={() => setScopeFilter("all")}
-                    >
-                      {bi("全部可关联", "All")} ({allUnboundOperable.length})
-                    </button>
+              sameIPUnbound.length > 0 || appOptions.length > 1 ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {sameIPUnbound.length > 0 && (
-                      <button
+                      <Radio.Group
                         type="button"
-                        className={`ptf-pill is-ok ${
-                          scopeFilter === "same_ip" ? "on" : ""
-                        }`}
-                        onClick={() => setScopeFilter("same_ip")}
+                        size="small"
+                        value={scopeFilter}
+                        onChange={(v) => setScopeFilter(v as "all" | "same_ip")}
                       >
-                        {bi("同机 IP", "Same IP")} ({sameIPUnbound.length})
-                      </button>
+                        <Radio value="all">
+                          {bi("全部可关联", "All")} ({allUnboundOperable.length})
+                        </Radio>
+                        <Radio value="same_ip">
+                          {bi("同机 IP", "Same IP")} ({sameIPUnbound.length})
+                        </Radio>
+                      </Radio.Group>
+                    )}
+                    {appOptions.length > 1 && (
+                      <Select
+                        size="small"
+                        style={{ width: 168 }}
+                        value={appFilter}
+                        onChange={setAppFilter}
+                        getPopupContainer={() => document.body}
+                        triggerProps={{ autoFitPosition: true }}
+                        options={[
+                          { value: "all", label: bi("全部中间件", "All Apps") },
+                          ...appOptions.map(([app, n]) => ({
+                            value: app,
+                            label: `${app} (${n})`,
+                          })),
+                        ]}
+                      />
                     )}
                   </div>
-                  {appOptions.length > 1 && (
-                    <Select
-                      size="mini"
-                      style={{ width: 148 }}
-                      value={appFilter}
-                      onChange={setAppFilter}
-                      getPopupContainer={() => document.body}
-                      triggerProps={{ autoFitPosition: true }}
-                      options={[
-                        { value: "all", label: bi("全部中间件", "All Apps") },
-                        ...appOptions.map(([app, n]) => ({
-                          value: app,
-                          label: `${app} (${n})`,
-                        })),
-                      ]}
-                    />
+                  {sameIPUnbound.length > 0 && (
+                    <Button
+                      size="small"
+                      type="outline"
+                      disabled={busy}
+                      onClick={() => onBind(sameIPUnbound.map((c) => c.id))}
+                    >
+                      {bi(
+                        `一键关联同机 IP (${sameIPUnbound.length})`,
+                        `Bind Same-IP (${sameIPUnbound.length})`,
+                      )}
+                    </Button>
                   )}
                 </div>
-                {sameIPUnbound.length > 0 && (
-                  <Button
-                    size="mini"
-                    type="outline"
-                    disabled={busy}
-                    onClick={() => onBind(sameIPUnbound.map((c) => c.id))}
-                  >
-                    {bi(
-                      `一键关联同机 IP (${sameIPUnbound.length})`,
-                      `Bind Same-IP (${sameIPUnbound.length})`,
-                    )}
-                  </Button>
-                )}
-              </div>
+              ) : undefined
             }
             onAdd={onBind}
             onRemove={onUnbind}

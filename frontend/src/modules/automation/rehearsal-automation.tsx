@@ -185,10 +185,12 @@ export function LiveExecLogCard({
               size="mini"
               type="text"
               icon={<IconCopy />}
-              onClick={() => {
-                copy(task.combined_output || "");
-                Message.success(bi("已复制脱敏执行输出", "Redacted output copied"));
-              }}
+              onClick={() =>
+                void copy(
+                  task.combined_output || "",
+                  bi("已复制脱敏执行输出", "Redacted output copied"),
+                )
+              }
             >
               {bi("复制输出", "Copy")}
             </Button>
@@ -1192,10 +1194,12 @@ export function ClusterAutomationPanel({
                     size="small"
                     type="outline"
                     icon={<IconCopy />}
-                    onClick={() => {
-                      copy(directConfigJSON);
-                      Message.success(bi("已复制 target-agent.json 配置", "Copied target-agent.json"));
-                    }}
+                    onClick={() =>
+                      void copy(
+                        directConfigJSON,
+                        bi("已复制 target-agent.json 配置", "Copied target-agent.json"),
+                      )
+                    }
                   >
                     {bi("复制配置文件 JSON", "Copy Config JSON")}
                   </Button>

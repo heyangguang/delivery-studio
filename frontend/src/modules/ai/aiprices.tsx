@@ -456,8 +456,7 @@ export function PricesView() {
         cancelText={bi("取消", "Cancel")}
         onOk={() => {
           if (io === "export") {
-            copy(text);
-            Message.success(bi("已复制", "Copied"));
+            void copy(text);
             return setIo("");
           }
           try {

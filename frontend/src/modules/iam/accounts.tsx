@@ -1391,15 +1391,15 @@ function AccountDetail({
           <code>{password}</code>
           <Button
             icon={<IconCopy />}
-            onClick={() => {
-              copy(
+            onClick={() =>
+              void copy(
                 bi(
                   `平台地址：${location.origin}\n用户名：${u.username}\n新密码：${password}`,
                   `Platform URL: ${location.origin}\nUsername: ${u.username}\nNew Password: ${password}`,
                 ),
-              );
-              Message.success(bi("已复制登录信息", "Credentials copied"));
-            }}
+                bi("已复制登录信息", "Credentials copied"),
+              )
+            }
           >
             {bi("复制登录信息", "Copy Credentials")}
           </Button>

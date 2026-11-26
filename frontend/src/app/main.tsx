@@ -336,10 +336,12 @@ class PageBoundary extends React.Component<
             {bi("回到集群", "Back to Clusters")}
           </Button>
           <Button
-            onClick={() => {
-              copy(diagText);
-              Message.success(bi("已复制错误诊断信息", "Copied diagnostic info"));
-            }}
+            onClick={() =>
+              void copy(
+                diagText,
+                bi("已复制错误诊断信息", "Copied diagnostic info"),
+              )
+            }
           >
             {bi("复制诊断信息", "Copy Diagnostics")}
           </Button>

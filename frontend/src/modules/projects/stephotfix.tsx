@@ -964,10 +964,12 @@ export function StepHotfixDrawer({
                       <Button
                         size="mini"
                         icon={<IconCopy />}
-                        onClick={() => {
-                          copy(savedBanner.verify_cmd!);
-                          Message.success(bi("已复制覆盖命令", "Command copied"));
-                        }}
+                        onClick={() =>
+                          void copy(
+                            savedBanner.verify_cmd!,
+                            bi("已复制覆盖命令", "Command copied"),
+                          )
+                        }
                       >
                         {bi("复制命令", "Copy")}
                       </Button>

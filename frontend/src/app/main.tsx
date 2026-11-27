@@ -1969,6 +1969,7 @@ function App() {
         v2={route.v2}
         tab={route.tab}
         scheme={route.scheme}
+        revise={route.revise}
       />
     );
   else if (route.name === "library")

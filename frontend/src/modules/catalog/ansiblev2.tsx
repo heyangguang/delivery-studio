@@ -359,11 +359,13 @@ export function AnsibleV2Studio({
   initialName,
   initialTab,
   initialScheme,
+  initialRevise,
 }: {
   onSwitchEngine: (next: "v2" | "v1") => void;
   initialName?: string;
   initialTab?: string;
   initialScheme?: string;
+  initialRevise?: string;
 }) {
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
@@ -545,12 +547,13 @@ export function AnsibleV2Studio({
         <section className="md-detail">
           {activeSummary ? (
             <AnsibleV2DetailPane
-              key={`${activeSummary.name}:${initialTab || ""}:${initialScheme || ""}`}
+              key={`${activeSummary.name}:${initialTab || ""}:${initialScheme || ""}:${initialRevise || ""}`}
               name={activeSummary.name}
               canEdit={canEdit}
               narrow={narrow}
               initialTab={activeSummary.name === initialName ? initialTab : undefined}
               initialScheme={activeSummary.name === initialName ? initialScheme : undefined}
+              initialRevise={activeSummary.name === initialName ? initialRevise : undefined}
               onBack={() => setSelected("")}
               onChanged={(nextSelect) => void reload(nextSelect)}
             />
@@ -602,6 +605,7 @@ function AnsibleV2DetailPane({
   narrow,
   initialTab,
   initialScheme,
+  initialRevise,
   onBack,
   onChanged,
 }: {
@@ -610,6 +614,7 @@ function AnsibleV2DetailPane({
   narrow: boolean;
   initialTab?: string;
   initialScheme?: string;
+  initialRevise?: string;
   onBack: () => void;
   onChanged: (nextSelect?: string) => void;
 }) {
@@ -833,7 +838,11 @@ function AnsibleV2DetailPane({
           key="deliver"
           title={bi("配置预览与生成交付", "Configure, Preview & Deliver")}
         >
-          <DeliverTab detail={detail} initialScheme={initialScheme} />
+          <DeliverTab
+            detail={detail}
+            initialScheme={initialScheme}
+            initialRevise={initialRevise}
+          />
         </Tabs.TabPane>
       </Tabs>
     </div>
@@ -1448,9 +1457,11 @@ function isNodeOnline(n: ExecNodeItem): boolean {
 function DeliverTab({
   detail,
   initialScheme,
+  initialRevise,
 }: {
   detail: AnsibleV2Detail;
   initialScheme?: string;
+  initialRevise?: string;
 }) {
   useLang();
   const m = detail.report.manifest;
@@ -1466,6 +1477,8 @@ function DeliverTab({
   const [deliveryMode, setDeliveryMode] = useState<"offline" | "automatic">("offline");
   const [execNodes, setExecNodes] = useState<ExecNodeItem[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
+  const [preferredNodeIp, setPreferredNodeIp] = useState<string>("");
+  const [reviseLoaded, setReviseLoaded] = useState(false);
   const [activeScheme, setActiveScheme] = useState<string>(startScheme?.id || "");
   const [hosts, setHosts] = useState<RenderHost[]>(() =>
     buildInitialHosts(m, startScheme),
@@ -1473,6 +1486,91 @@ function DeliverTab({
   const [vars, setVars] = useState<Record<string, unknown>>(() =>
     buildInitialVars(detail.report.vars || [], startScheme),
   );
+  const [offlineRepoOpen, setOfflineRepoOpen] = useState(false);
+  const [offlineAptUrl, setOfflineAptUrl] = useState("");
+  const [offlineRpmUrl, setOfflineRpmUrl] = useState("");
+  const [offlineDisableBase, setOfflineDisableBase] = useState(false);
+
+  // Hydrate existing cluster hosts, placement, vars & execution node when revising a 2.0 delivery
+  useEffect(() => {
+    if (!initialRevise) return;
+    let alive = true;
+    api<{
+      job?: { cluster_id?: string; delivery_mode?: string; scheme?: { id?: string } };
+      spec?: {
+        deployment?: {
+          id?: string;
+          platform?: string;
+          delivery_mode?: string;
+          controller?: string;
+          execution_host?: { name?: string; ip?: string };
+          hosts?: { name: string; ip: string }[];
+          instances?: { placement?: Record<string, string[]>; params?: Record<string, unknown> }[];
+        };
+      };
+    }>(`/api/jobs/${encodeURIComponent(initialRevise)}`)
+      .then((d) => {
+        if (!alive) return;
+        const dep = d?.spec?.deployment;
+        const cid = d?.job?.cluster_id || dep?.id;
+        if (cid) setClusterId(cid);
+        if (dep?.platform) setPlatform(dep.platform);
+        const mode = d?.job?.delivery_mode || dep?.delivery_mode;
+        if (mode === "automatic" || mode === "offline") setDeliveryMode(mode);
+        if (d?.job?.scheme?.id) setActiveScheme(d.job.scheme.id);
+        if (dep?.execution_host?.ip) setPreferredNodeIp(dep.execution_host.ip);
+        const inst = dep?.instances?.[0];
+        if (dep?.hosts && dep.hosts.length > 0) {
+          const placement = inst?.placement || {};
+          const byHost: Record<string, string[]> = {};
+          for (const [g, hList] of Object.entries(placement)) {
+            for (const hn of hList || []) {
+              byHost[hn] = [...(byHost[hn] || []), g];
+            }
+          }
+          setHosts(
+            dep.hosts.map((h) => ({
+              name: h.name,
+              ip: h.ip,
+              groups:
+                byHost[h.name]?.length > 0
+                  ? byHost[h.name]
+                  : [groups[0].name],
+            })),
+          );
+        }
+        if (inst?.params && typeof inst.params === "object") {
+          const merged = {
+            ...buildInitialVars(detail.report.vars || [], undefined),
+            ...inst.params,
+          };
+          const aptM = merged["delivery_studio_apt_mirror"];
+          const rpmM = merged["delivery_studio_rpm_mirror"];
+          const disB = merged["delivery_studio_disable_base_repos"];
+          if (typeof aptM === "string" && aptM.trim()) {
+            setOfflineAptUrl(aptM.trim());
+            setOfflineRepoOpen(true);
+          }
+          if (typeof rpmM === "string" && rpmM.trim()) {
+            setOfflineRpmUrl(rpmM.trim());
+            setOfflineRepoOpen(true);
+          }
+          if (typeof disB === "boolean") setOfflineDisableBase(disB);
+          delete merged["delivery_studio_apt_mirror"];
+          delete merged["delivery_studio_rpm_mirror"];
+          delete merged["delivery_studio_disable_base_repos"];
+          setVars(merged);
+        }
+        setReviseLoaded(true);
+      })
+      .catch(() => {
+        if (alive) setReviseLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRevise, detail.name]);
 
   useEffect(() => {
     if (deliveryMode !== "automatic") return;
@@ -1481,6 +1579,10 @@ function DeliverTab({
         const list = Array.isArray(nodes) ? nodes : [];
         setExecNodes(list);
         setSelectedNodeId((cur) => {
+          if (preferredNodeIp) {
+            const byIp = list.find((n) => n.controller_ip === preferredNodeIp);
+            if (byIp) return byIp.id;
+          }
           if (cur && list.some((n) => n.id === cur)) return cur;
           const online = list.find((n) => isNodeOnline(n));
           return online?.id || list[0]?.id || "";
@@ -1489,7 +1591,7 @@ function DeliverTab({
       .catch(() => {
         setExecNodes([]);
       });
-  }, [deliveryMode]);
+  }, [deliveryMode, preferredNodeIp]);
 
   const [preview, setPreview] = useState<RenderResult | null>(null);
   const [previewErr, setPreviewErr] = useState("");
@@ -1504,6 +1606,17 @@ function DeliverTab({
     setHosts(buildInitialHosts(m, sc));
     setVars(buildInitialVars(detail.report.vars || [], sc));
   };
+
+  const offlineRepoPayload = useMemo(() => {
+    const apt = offlineAptUrl.trim();
+    const rpm = offlineRpmUrl.trim();
+    if (!apt && !rpm) return undefined;
+    return {
+      apt_url: apt || undefined,
+      rpm_url: rpm || undefined,
+      disable_base: offlineDisableBase,
+    };
+  }, [offlineAptUrl, offlineRpmUrl, offlineDisableBase]);
 
   const runPreview = useCallback(async () => {
     const validHosts = hosts.filter((h) => h.ip.trim() !== "");
@@ -1526,6 +1639,7 @@ function DeliverTab({
             scheme: activeScheme,
             hosts: validHosts,
             vars,
+            ...(offlineRepoPayload ? { offline_repo: offlineRepoPayload } : {}),
           }),
         },
       );
@@ -1535,7 +1649,7 @@ function DeliverTab({
     } finally {
       setPreviewLoading(false);
     }
-  }, [detail.name, clusterId, platform, deliveryMode, activeScheme, hosts, vars]);
+  }, [detail.name, clusterId, platform, deliveryMode, activeScheme, hosts, vars, offlineRepoPayload]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -1574,6 +1688,8 @@ function DeliverTab({
       scheme: activeScheme,
       hosts: validHosts,
       vars,
+      ...(initialRevise ? { revises: initialRevise } : {}),
+      ...(offlineRepoPayload ? { offline_repo: offlineRepoPayload } : {}),
     };
     if (chosenNode) {
       if (chosenNode.kind === "independent") {
@@ -1640,6 +1756,45 @@ function DeliverTab({
 
   return (
     <div style={{ paddingTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+      {initialRevise && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "10px 14px",
+            borderRadius: "var(--r)",
+            background: "var(--accent-tint, rgba(255, 70, 45, 0.08))",
+            border: "1px solid var(--accent-line, rgba(255, 70, 45, 0.28))",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+              {bi(
+                `正在修订集群 ${clusterId} 的原生 Ansible 2.0 配置`,
+                `Revising native Ansible 2.0 config for ${clusterId}`,
+              )}
+            </span>
+            <span className="av2-card-sub">
+              {reviseLoaded
+                ? bi(
+                    "已自动回填原集群主机拓扑、分组与变量；修改参数生成新修订后，可在执行中心开启 --check --diff 预演真实配置差异",
+                    "Pre-filled from existing cluster topology & vars; generate the revision and preview exact config diffs with --check --diff",
+                  )
+                : bi("正在读取原集群配置…", "Loading existing cluster config…")}
+            </span>
+          </div>
+          <Button
+            size="small"
+            onClick={() => go({ name: "deliveries", id: clusterId, tab: "plans" })}
+          >
+            {bi("返回原集群", "Back to Cluster")}
+          </Button>
+        </div>
+      )}
+
       {/* Top Delivery Metadata */}
       <div className="av2-card">
         <div
@@ -1655,6 +1810,7 @@ function DeliverTab({
             </label>
             <Input
               value={clusterId}
+              disabled={Boolean(initialRevise)}
               onChange={setClusterId}
               placeholder={`${detail.name}-prod`}
             />
@@ -1965,6 +2121,76 @@ function DeliverTab({
               </div>
             )}
           </div>
+
+          {/* Air-Gapped / Internal Offline Software Mirror Config */}
+          <div className="av2-card">
+            <div className="av2-card-head">
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <h3 className="av2-card-title">
+                  {bi("离线软件源 / 内网镜像（可选）", "Offline / Internal Package Mirror (Optional)")}
+                </h3>
+                <span className="av2-card-sub">
+                  {bi(
+                    "无外网场景自动生成标准 playbooks/configure-offline-repo.yml，优先注入内网 APT/YUM 源",
+                    "Generates standard playbooks/configure-offline-repo.yml to configure air-gapped APT/YUM mirrors first",
+                  )}
+                </span>
+              </div>
+              <Button
+                size="mini"
+                type="text"
+                onClick={() => setOfflineRepoOpen((v) => !v)}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                {offlineRepoOpen
+                  ? bi("收起", "Collapse")
+                  : offlineRepoPayload
+                    ? bi("已配置 · 展开", "Configured · Expand")
+                    : bi("展开配置", "Configure")}
+              </Button>
+            </div>
+            {offlineRepoOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div className="av2-field">
+                  <label className="av2-field-label">
+                    <span>{bi("内网 APT 镜像源地址（Debian / Ubuntu）", "Internal APT Mirror URL")}</span>
+                    <span className="av2-field-key">delivery_studio_apt_mirror</span>
+                  </label>
+                  <Input
+                    size="small"
+                    value={offlineAptUrl}
+                    onChange={setOfflineAptUrl}
+                    placeholder="http://10.10.0.10:8088/ubuntu-24.04"
+                  />
+                </div>
+                <div className="av2-field">
+                  <label className="av2-field-label">
+                    <span>{bi("内网 YUM / DNF 镜像源地址（RHEL / Kylin）", "Internal YUM/DNF Mirror URL")}</span>
+                    <span className="av2-field-key">delivery_studio_rpm_mirror</span>
+                  </label>
+                  <Input
+                    size="small"
+                    value={offlineRpmUrl}
+                    onChange={setOfflineRpmUrl}
+                    placeholder="http://10.10.0.10:8088/el9-amd64"
+                  />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Switch
+                    size="small"
+                    checked={offlineDisableBase}
+                    onChange={setOfflineDisableBase}
+                  />
+                  <span style={{ fontSize: 12.5, color: "var(--ink)" }}>
+                    {bi(
+                      "备份并禁用目标机默认公网源（纯离线隔离网必选）",
+                      "Backup & disable default public OS repositories (air-gapped)",
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Live Preview & Deliver Action */}
@@ -2057,7 +2283,9 @@ function DeliverTab({
                   disabled={!canDeliver}
                   onClick={() => void handleDeliver()}
                 >
-                  {bi("生成 2.0 交付并打开手册", "Generate Delivery & Open Runbook")}
+                  {initialRevise
+                    ? bi("生成 2.0 修订并打开手册", "Generate Revision & Open Runbook")
+                    : bi("生成 2.0 交付并打开手册", "Generate Delivery & Open Runbook")}
                 </Button>
               </span>
             </Tooltip>

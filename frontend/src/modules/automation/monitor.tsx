@@ -168,6 +168,7 @@ type ExecRun = {
   sync_version?: number;
   steps: ExecStep[];
   note?: string;
+  check_mode?: boolean;
 };
 
 type ExecChoice = {
@@ -3551,6 +3552,11 @@ function MonitorWorkspace({
                     <span className={`mon-dot ${dotState}`} aria-hidden />
                     <span className="mon-pill-num">#{num}</span>
                     <span>{label}</span>
+                    {r.check_mode && (
+                      <em className="mon-pill-tag warn" style={{ whiteSpace: "nowrap" }}>
+                        {bi("预演 --check", "Dry-run")}
+                      </em>
+                    )}
                     {live && (
                       <em className="mon-pill-tag live">
                         {bi("运行中", "Live")}

@@ -171,4 +171,75 @@ func TestAnsibleV2APIInspectImportPreviewDeliverAndRBAC(t *testing.T) {
 	if !strings.Contains(savedOut, `"saved": true`) {
 		t.Fatalf("expected admin AI save tool to succeed, got: %s", savedOut)
 	}
+
+	// 10. Verify 2.0 Online Revision + Offline Mirror Playbook Injection
+	revBody := `{
+		"revises": "` + autoResp.JobID + `",
+		"delivery_mode": "automatic",
+		"scheme": "single",
+		"execution_host": {"name": "ctrl-01", "ip": "10.10.0.10"},
+		"hosts": [{"name": "web-01", "ip": "10.10.0.11", "groups": ["nginx"]}],
+		"vars": {"nginx_listen_port": 9090},
+		"offline_repo": {"apt_url": "http://10.10.0.10:8088/ubuntu-24.04", "disable_base": true}
+	}`
+	w = storeRequest(s, "POST", "/api/v2/ansible/components/nginx-native/deliver", strings.NewReader(revBody), admin, csrf)
+	if w.Code != 201 {
+		t.Fatalf("v2 revision deliver failed: %d %s", w.Code, w.Body.String())
+	}
+	var revResp struct {
+		JobID     string `json:"job_id"`
+		ClusterID string `json:"cluster_id"`
+		Revises   string `json:"revises"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &revResp)
+	if revResp.ClusterID != "nginx-v2-auto" || revResp.Revises != autoResp.JobID {
+		t.Fatalf("unexpected revision metadata: %+v", revResp)
+	}
+	s.mu.Lock()
+	oldJob := s.jobs[autoResp.JobID]
+	revJob := s.jobs[revResp.JobID]
+	s.mu.Unlock()
+	if oldJob.RevisedBy != revResp.JobID || oldJob.Outcome != outcomeVoid {
+		t.Fatalf("expected old v2 job to be superseded, got outcome=%q revised_by=%q", oldJob.Outcome, oldJob.RevisedBy)
+	}
+	revSnap, err := s.executionSnapshotFor(revJob)
+	if err != nil {
+		t.Fatalf("executionSnapshotFor revised job failed: %v", err)
+	}
+	if len(revSnap.Files["playbooks/configure-offline-repo.yml"]) == 0 || !strings.Contains(string(revSnap.Files["inventory/group_vars/all.yml"]), "delivery_studio_apt_mirror") {
+		t.Fatalf("expected offline mirror playbook & group_vars in revised v2 snapshot")
+	}
+	if !strings.Contains(string(revSnap.Files["callback_plugins/delivery_studio.py"]), "v2_on_file_diff") {
+		t.Fatalf("expected v2_on_file_diff callback support in delivery_studio.py")
+	}
+
+	// 11. Verify dry-run check_mode run never writes progress.json nor leaks into enriched runbook progress
+	dryRun := executionRun{
+		ID:        "dryrun-test-01",
+		Job:       revJob.ID,
+		Cluster:   revJob.ClusterID,
+		Revision:  s.executionRevision(revJob.ID),
+		CheckMode: true,
+		State:     "completed",
+		Created:   executionNow(),
+		Steps: []executionStep{
+			{ID: "attempt-dry-1", Key: "deploy/ansible-v2/instance-nginx-native/deploy-1", Title: "Deploy Nginx", State: "succeeded", Finished: executionNow()},
+		},
+	}
+	s.projectExecutionResult(dryRun, "attempt-dry-1")
+	if prog := s.readProgress(revJob.ID); prog.Steps["deploy/ansible-v2/instance-nginx-native/deploy-1"].State != "" {
+		t.Fatalf("check_mode dry-run must never write progress.json, got %+v", prog.Steps)
+	}
+	execDB, err := s.readExecutions()
+	if err != nil {
+		t.Fatalf("readExecutions failed: %v", err)
+	}
+	execDB.Runs[dryRun.ID] = dryRun
+	if err := s.saveExecutions(execDB); err != nil {
+		t.Fatalf("saveExecutions failed: %v", err)
+	}
+	enriched := s.enrichProgressWithExecutions(revJob.ID, s.readProgress(revJob.ID))
+	if enriched.Steps["deploy/ansible-v2/instance-nginx-native/deploy-1"].State != "" || len(enriched.Events) != 0 {
+		t.Fatalf("check_mode dry-run must never mark runbook steps done via enrichProgressWithExecutions, got steps=%+v events=%+v", enriched.Steps, enriched.Events)
+	}
 }

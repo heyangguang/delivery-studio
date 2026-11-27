@@ -24,15 +24,23 @@ type RenderHost struct {
 	Vars   map[string]any `json:"vars,omitempty"`
 }
 
+// OfflineRepoConfig optionally configures air-gapped APT/YUM mirrors before component deployment.
+type OfflineRepoConfig struct {
+	APTURL      string `json:"apt_url,omitempty"`
+	RPMURL      string `json:"rpm_url,omitempty"`
+	DisableBase bool   `json:"disable_base,omitempty"`
+}
+
 // RenderRequest drives standard Ansible project synthesis for a 2.0 component.
 type RenderRequest struct {
-	ClusterID    string         `json:"cluster_id"`
-	Platform     string         `json:"platform,omitempty"`
-	DeliveryMode string         `json:"delivery_mode,omitempty"` // offline | automatic
-	Scheme       string         `json:"scheme,omitempty"`
-	Controller   string         `json:"controller,omitempty"`
-	Hosts        []RenderHost   `json:"hosts"`
-	Vars         map[string]any `json:"vars,omitempty"`
+	ClusterID    string             `json:"cluster_id"`
+	Platform     string             `json:"platform,omitempty"`
+	DeliveryMode string             `json:"delivery_mode,omitempty"` // offline | automatic
+	Scheme       string             `json:"scheme,omitempty"`
+	Controller   string             `json:"controller,omitempty"`
+	Hosts        []RenderHost       `json:"hosts"`
+	Vars         map[string]any     `json:"vars,omitempty"`
+	OfflineRepo  *OfflineRepoConfig `json:"offline_repo,omitempty"`
 }
 
 // RenderResult holds the 100% standalone-runnable Ansible project, key previews, and runbook steps.
@@ -59,6 +67,7 @@ const studioCallbackPluginPy = `# -*- coding: utf-8 -*-
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
+import difflib
 import json
 import os
 import time
@@ -76,6 +85,7 @@ class CallbackModule(CallbackBase):
         self._log_path = os.environ.get("DELIVERY_STUDIO_EVENT_LOG", "").strip()
         self._step_log = os.environ.get("DELIVERY_STUDIO_STEP_LOG", "").strip()
         self._playbook = os.environ.get("DELIVERY_STUDIO_PLAYBOOK", "").strip()
+        self._check_mode = os.environ.get("DELIVERY_STUDIO_CHECK_MODE", "").strip() in ("1", "true", "yes")
         self._header_written = False
 
     def _emit(self, event_type, payload):
@@ -109,7 +119,8 @@ class CallbackModule(CallbackBase):
         pb = self._playbook or playbook_name or "playbooks/deploy.yml"
         self._playbook = pb
         now = time.strftime("%Y-%m-%d %H:%M:%S +0000", time.gmtime())
-        self._write_step("playbook %s\nstarted %s\n" % (pb, now))
+        extra = "  [CHECK MODE] read-only dry-run (--check --diff)\n" if self._check_mode else ""
+        self._write_step("playbook %s\nstarted %s\n%s" % (pb, now, extra))
 
     def _is_no_log(self, result):
         try:
@@ -172,6 +183,37 @@ class CallbackModule(CallbackBase):
     def v2_runner_on_skipped(self, result):
         host = result._host.get_name()
         self._write_step("  skipped %s\n" % host)
+
+    def v2_on_file_diff(self, result):
+        if self._is_no_log(result):
+            return
+        diff = result._result.get("diff")
+        if not diff:
+            return
+        items = diff if isinstance(diff, list) else [diff]
+        host = result._host.get_name()
+        lines_out = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            prepared = item.get("prepared")
+            if isinstance(prepared, str) and prepared.strip():
+                for ln in prepared.splitlines()[:60]:
+                    lines_out.append("    %s" % ln[:400])
+                continue
+            before = item.get("before")
+            after = item.get("after")
+            if before is None and after is None:
+                continue
+            bh = str(item.get("before_header") or "before")
+            ah = str(item.get("after_header") or "after")
+            b_lines = str(before or "").splitlines()
+            a_lines = str(after or "").splitlines()
+            ud = list(difflib.unified_diff(b_lines, a_lines, fromfile=bh, tofile=ah, lineterm=""))
+            for ln in ud[:60]:
+                lines_out.append("    %s" % ln[:400])
+        if lines_out:
+            self._write_step("  diff %s\n%s\n" % (host, "\n".join(lines_out)))
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
         host = result._host.get_name()
@@ -276,6 +318,16 @@ func Render(files map[string][]byte, m Manifest, req RenderRequest) (*RenderResu
 	for k, v := range req.Vars {
 		mergedVars[k] = v
 	}
+	hasOfflineRepo := req.OfflineRepo != nil && (strings.TrimSpace(req.OfflineRepo.APTURL) != "" || strings.TrimSpace(req.OfflineRepo.RPMURL) != "")
+	if hasOfflineRepo {
+		if u := strings.TrimSpace(req.OfflineRepo.APTURL); u != "" {
+			mergedVars["delivery_studio_apt_mirror"] = u
+		}
+		if u := strings.TrimSpace(req.OfflineRepo.RPMURL); u != "" {
+			mergedVars["delivery_studio_rpm_mirror"] = u
+		}
+		mergedVars["delivery_studio_disable_base_repos"] = req.OfflineRepo.DisableBase
+	}
 
 	// Build 100% standard YAML inventory/hosts.yml
 	allHosts := map[string]any{}
@@ -378,6 +430,20 @@ ssh_args = -o ControlMaster=auto -o ControlPersist=60s
 
 	// Re-inspect rendered tree for exact executable steps
 	steps, _, _ := extractPlaysAndSteps(outFiles, m.Entrypoints)
+	if hasOfflineRepo {
+		outFiles["playbooks/configure-offline-repo.yml"] = []byte(offlineRepoPlaybookYAML)
+		repoStep := PlayStep{
+			ID:       "offline-repo-1",
+			Phase:    "deploy",
+			Playbook: "playbooks/configure-offline-repo.yml",
+			PlayName: "配置内网 / 离线软件源镜像",
+			Hosts:    "all",
+			Title:    fmt.Sprintf("[%s] 配置内网 / 离线软件源镜像", m.Name),
+			Effect:   "change",
+			Command:  "ansible-playbook -i inventory/hosts.yml playbooks/configure-offline-repo.yml",
+		}
+		steps = append([]PlayStep{repoStep}, steps...)
+	}
 
 	// Generate clean standalone README.md
 	var readme strings.Builder
@@ -469,3 +535,92 @@ func marshalYAMLDoc(header string, doc any) ([]byte, error) {
 	_ = enc.Close()
 	return buf.Bytes(), nil
 }
+
+const offlineRepoPlaybookYAML = `---
+- name: 配置内网 / 离线软件源镜像
+  hosts: all
+  become: true
+  tasks:
+    - name: 备份默认 APT 源（禁用公网源时）
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p /etc/apt/sources.backup.ds
+        if [ -f /etc/apt/sources.list ] && [ ! -f /etc/apt/sources.backup.ds/sources.list ]; then
+          mv /etc/apt/sources.list /etc/apt/sources.backup.ds/sources.list
+        fi
+        for f in /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+          [ -e "$f" ] || continue
+          case "$(basename "$f")" in
+            delivery-studio-offline.list) continue ;;
+          esac
+          mv "$f" /etc/apt/sources.backup.ds/
+        done
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - delivery_studio_apt_mirror is defined
+        - delivery_studio_apt_mirror | length > 0
+        - delivery_studio_disable_base_repos | default(false) | bool
+      changed_when: true
+
+    - name: 写入内网 APT 镜像源配置
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/delivery-studio-offline.list
+        mode: "0644"
+        content: |
+          # Managed by Kyndryl Delivery Studio 2.0 (Offline/Internal Mirror)
+          deb [trusted=yes] {{ delivery_studio_apt_mirror }} ./
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - delivery_studio_apt_mirror is defined
+        - delivery_studio_apt_mirror | length > 0
+      register: ds_apt_mirror
+
+    - name: 刷新 APT 软件包索引
+      ansible.builtin.apt:
+        update_cache: true
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - delivery_studio_apt_mirror is defined
+        - delivery_studio_apt_mirror | length > 0
+
+    - name: 备份默认 YUM/DNF 源（禁用公网源时）
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p /etc/yum.repos.d/backup.ds
+        for f in /etc/yum.repos.d/*.repo; do
+          [ -e "$f" ] || continue
+          case "$(basename "$f")" in
+            delivery-studio-offline.repo) continue ;;
+          esac
+          mv "$f" /etc/yum.repos.d/backup.ds/
+        done
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - delivery_studio_rpm_mirror is defined
+        - delivery_studio_rpm_mirror | length > 0
+        - delivery_studio_disable_base_repos | default(false) | bool
+      changed_when: true
+
+    - name: 写入内网 YUM/DNF 镜像源配置
+      ansible.builtin.copy:
+        dest: /etc/yum.repos.d/delivery-studio-offline.repo
+        mode: "0644"
+        content: |
+          [delivery-studio-offline]
+          name=Kyndryl Delivery Studio Offline Mirror
+          baseurl={{ delivery_studio_rpm_mirror }}
+          enabled=1
+          gpgcheck=0
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - delivery_studio_rpm_mirror is defined
+        - delivery_studio_rpm_mirror | length > 0
+
+    - name: 刷新 YUM/DNF 元数据缓存
+      ansible.builtin.command: dnf makecache --refresh
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - delivery_studio_rpm_mirror is defined
+        - delivery_studio_rpm_mirror | length > 0
+      changed_when: false
+`

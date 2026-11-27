@@ -255,7 +255,7 @@ func (s *storeServer) extractAutoReportSteps(jobID string, rawPlan []byte, execD
 		// Sort runs oldest -> newest so latest completed attempt duration wins per step key.
 		var runs []executionRun
 		for _, r := range execDB.Runs {
-			if r.Job == jobID {
+			if r.Job == jobID && !r.CheckMode {
 				runs = append(runs, r)
 			}
 		}
@@ -537,7 +537,7 @@ func (s *storeServer) evalVerificationJobFast(j storeJob, comp, ver, platform st
 	var executorName string
 	if execDB != nil {
 		for _, r := range execDB.Runs {
-			if r.Job != j.ID {
+			if r.Job != j.ID || r.CheckMode {
 				continue
 			}
 			hasAutoRun = true

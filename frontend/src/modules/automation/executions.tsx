@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Checkbox, Drawer, Input, Modal, Select, Tooltip } from "@arco-design/web-react";
+import { Button, Checkbox, Drawer, Input, Modal, Select, Switch, Tooltip } from "@arco-design/web-react";
 import {
   IconCheck,
   IconCheckCircleFill,
@@ -70,6 +70,7 @@ type Run = {
   sync_version?: number;
   safety_confirmed?: boolean;
   safety_warnings?: string[];
+  check_mode?: boolean;
   steps: Step[];
 };
 type Choice = {
@@ -437,7 +438,8 @@ export function ExecutionPanel({
     [safeConfirmed, setSafeConfirmed] = useState(false),
     [safetyConfirmed, setSafetyConfirmed] = useState(false),
     [serverSafetyWarnings, setServerSafetyWarnings] = useState<string[]>([]),
-    [prepared, setPrepared] = useState(false);
+    [prepared, setPrepared] = useState(false),
+    [checkMode, setCheckMode] = useState(false);
   const [review, setReview] = useState<Data | null>(null);
   const [setupError, setSetupError] = useState("");
   const [accessOpen, setAccessOpen] = useState(false);
@@ -683,6 +685,7 @@ export function ExecutionPanel({
     setSafetyConfirmed(false);
     setServerSafetyWarnings([]);
     setPrepared(false);
+    setCheckMode(false);
     setAccessOpen(false);
     setChecksOpen(false);
     setSetupError("");
@@ -734,9 +737,9 @@ export function ExecutionPanel({
 
   const start = async () => {
     if (!data || busyLockRef.current) return;
-    const hasRisky = picked.some((s) =>
-      ["disruptive", "destructive"].includes(s.effect),
-    );
+    const hasRisky =
+      !checkMode &&
+      picked.some((s) => ["disruptive", "destructive"].includes(s.effect));
     const effectiveConfirm = hasRisky ? confirm : safeConfirmed ? cluster : "";
     busyLockRef.current = true;
     setBusy(true);
@@ -752,6 +755,7 @@ export function ExecutionPanel({
           preparation: preparation?.id,
           revision: reviewRevision.current,
           request: request.current,
+          check_mode: checkMode,
         }),
       });
       setOpen(false);
@@ -785,10 +789,11 @@ export function ExecutionPanel({
   const running = data?.runs.find(active);
   const available = data?.steps.filter((s) => s.available) || [];
   const picked = review?.steps.filter((s) => keys.includes(s.key)) || [];
-  const hasRiskyPicked = picked.some((s) =>
-    ["disruptive", "destructive"].includes(s.effect),
-  );
+  const hasRiskyPicked =
+    !checkMode &&
+    picked.some((s) => ["disruptive", "destructive"].includes(s.effect));
   const safetyWarnings = useMemo(() => {
+    if (checkMode) return [];
     const out: string[] = [];
     const push = (m: string) => {
       if (m && !out.includes(m)) out.push(m);
@@ -825,7 +830,7 @@ export function ExecutionPanel({
     }
     serverSafetyWarnings.forEach(push);
     return out;
-  }, [picked, review?.steps, preparation?.checks, data?.data_warnings, serverSafetyWarnings]);
+  }, [checkMode, picked, review?.steps, preparation?.checks, data?.data_warnings, serverSafetyWarnings]);
   const safetySig = safetyWarnings.join("\n");
   useEffect(() => {
     setSafetyConfirmed(false);
@@ -1197,6 +1202,14 @@ export function ExecutionPanel({
               >
                 <div className="exec-batch-head">
                   <span className="exec-batch-num num">#{runNum}</span>
+                  {run.check_mode && (
+                    <span
+                      className="exec-status paused"
+                      style={{ whiteSpace: "nowrap" }}
+                    >
+                      {bi("预演 --check", "Dry-run")}
+                    </span>
+                  )}
                   <span className={`exec-status ${batchTone}`}>
                     {batchLabel}
                   </span>
@@ -1369,9 +1382,19 @@ export function ExecutionPanel({
                     className="ex-confirm-safe"
                   >
                     <span>
-                      {bi("确认在集群", "Confirm run on")}{" "}
-                      <code>{cluster}</code>{" "}
-                      {bi("按序执行（失败即止）", "(fail-fast)")}
+                      {checkMode ? (
+                        <>
+                          {bi("确认在集群", "Confirm dry-run on")}{" "}
+                          <code>{cluster}</code>{" "}
+                          {bi("以只读预演模式 (--check --diff) 检查变更差异", "in read-only check/diff mode")}
+                        </>
+                      ) : (
+                        <>
+                          {bi("确认在集群", "Confirm run on")}{" "}
+                          <code>{cluster}</code>{" "}
+                          {bi("按序执行（失败即止）", "(fail-fast)")}
+                        </>
+                      )}
                     </span>
                   </Checkbox>
                 ) : (
@@ -1411,9 +1434,13 @@ export function ExecutionPanel({
                     disabled={!canLaunchNow}
                     onClick={start}
                   >
-                    {keys.length > 0
-                      ? bi(`开始执行 ${keys.length} 步`, `Run ${keys.length} Steps`)
-                      : bi("开始执行", "Start Execution")}
+                    {checkMode
+                      ? keys.length > 0
+                        ? bi(`开始预演 ${keys.length} 步 (--check)`, `Dry-run ${keys.length} Steps`)
+                        : bi("开始预演 (--check)", "Start Dry-run")
+                      : keys.length > 0
+                        ? bi(`开始执行 ${keys.length} 步`, `Run ${keys.length} Steps`)
+                        : bi("开始执行", "Start Execution")}
                   </Button>
                 )}
               </div>
@@ -1866,6 +1893,38 @@ export function ExecutionPanel({
                       `${keys.length} / ${availReviewSteps.length} selected`,
                     )}
                   </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "8px 12px",
+                    margin: "0 0 8px",
+                    borderRadius: "var(--r)",
+                    background: checkMode ? "var(--warn-tint, rgba(217, 119, 6, 0.08))" : "var(--surface-2)",
+                    border: checkMode ? "1px solid var(--warn-line, rgba(217, 119, 6, 0.35))" : "1px solid var(--line)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <Switch
+                      size="small"
+                      checked={checkMode}
+                      onChange={setCheckMode}
+                      aria-label={bi("预演模式 (--check --diff)", "Dry-run mode (--check --diff)")}
+                    />
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)", whiteSpace: "nowrap" }}>
+                      {bi("预演模式 (--check --diff)", "Dry-run Mode (--check --diff)")}
+                    </span>
+                    <span className="faint small">
+                      {bi(
+                        "仅以只读方式预览配置差异与变更影响，不修改目标机状态，也不覆盖交付进度",
+                        "Read-only preview of config diffs and pending changes; never mutates hosts or overwrites progress",
+                      )}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="ex-phase-list">

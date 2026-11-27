@@ -328,11 +328,12 @@ func (s *storeServer) enrichProgressWithExecutionDB(id string, doc progressDoc, 
 		}
 	}
 
-	// 2. Collect ALL immutable execution runs for this delivery (across all sync revisions)
-	// so every historical attempt (including earlier failed attempts) stays inspectable with full logs.
+	// 2. Collect ALL non-dry-run immutable execution runs for this delivery (across all sync revisions)
+	// so every real historical attempt stays inspectable with full logs. Read-only --check dry-runs
+	// remain viewable in Execution Center / run history and never mark runbook steps done.
 	allRuns := []executionRun{}
 	for _, r := range d.Runs {
-		if r.Job == id {
+		if r.Job == id && !r.CheckMode {
 			allRuns = append(allRuns, r)
 		}
 	}

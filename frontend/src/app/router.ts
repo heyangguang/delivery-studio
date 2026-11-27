@@ -35,7 +35,7 @@ export type Route =
       run?: string;
       step?: string;
     }
-  | { name: "components"; id?: string; edit?: string; v2?: string; tab?: string; scheme?: string }
+  | { name: "components"; id?: string; edit?: string; v2?: string; tab?: string; scheme?: string; revise?: string }
   | { name: "library"; id?: string }
   | {
       name: "security";
@@ -134,6 +134,7 @@ export function parse(hash: string): Route {
           v2: q.get("v2") || undefined,
           tab: q.get("tab") || undefined,
           scheme: q.get("scheme") || undefined,
+          revise: q.get("revise") || undefined,
         };
   if (p[0] === "accounts" || p[0] === "iam")
     return { name: "accounts", id: p[1] };
@@ -215,6 +216,7 @@ export const href = (r: Route): string => {
         cq.set("v2", r.v2);
         if (r.tab) cq.set("tab", r.tab);
         if (r.scheme) cq.set("scheme", r.scheme);
+        if (r.revise) cq.set("revise", r.revise);
         return `#/components?${cq}`;
       }
       return r.id

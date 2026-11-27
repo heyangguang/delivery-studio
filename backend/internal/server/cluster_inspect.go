@@ -129,7 +129,11 @@ func buildLiveInspectScript(f clusterFacts, dep *mwpack.Deployment, overrides cl
 		}
 		for _, inst := range dep.Instances {
 			if inst.Params != nil {
-				for _, pk := range []string{"port", "tls_port", "http_port", "https_port", "client_port", "stats_port"} {
+				for _, pk := range []string{
+					"port", "tls_port", "http_port", "https_port", "client_port", "stats_port",
+					"nginx_listen_port", "redis_port", "redis_sentinel_port", "pg_port",
+					"etcd_client_port", "haproxy_frontend_port", "haproxy_stats_port", "node_exporter_port",
+				} {
 					if raw, ok := inst.Params[pk]; ok {
 						if pn, err := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", raw))); err == nil {
 							addPort(pn)
@@ -298,7 +302,20 @@ func buildLiveInspectScript(f clusterFacts, dep *mwpack.Deployment, overrides cl
 	b.WriteString("  fi\n")
 	b.WriteString("done\n")
 	b.WriteString("if command -v redis-cli >/dev/null 2>&1; then\n")
-	b.WriteString("  R_INFO=$(timeout 3 redis-cli info replication 2>/dev/null | tr -d '\\r' || true)\n")
+	b.WriteString("  R_AUTH=\"\"\n")
+	b.WriteString("  R_PORT=6379\n")
+	b.WriteString("  for rcf in /etc/redis/redis.conf /etc/redis.conf /opt/redis*/etc/redis.conf; do\n")
+	b.WriteString("    if [ -r \"$rcf\" ]; then\n")
+	b.WriteString("      [ -z \"$R_AUTH\" ] && R_AUTH=$(awk '!/^[[:space:]]*#/ && $1==\"requirepass\" {gsub(/\"|\\047/, \"\", $2); print $2; exit}' \"$rcf\" 2>/dev/null || true)\n")
+	b.WriteString("      RP=$(awk '!/^[[:space:]]*#/ && $1==\"port\" {print $2; exit}' \"$rcf\" 2>/dev/null || true)\n")
+	b.WriteString("      [ -n \"$RP\" ] && [ \"$RP\" != \"0\" ] && R_PORT=\"$RP\"\n")
+	b.WriteString("    fi\n")
+	b.WriteString("  done\n")
+	b.WriteString("  if [ -n \"$R_AUTH\" ]; then\n")
+	b.WriteString("    R_INFO=$(REDISCLI_AUTH=\"$R_AUTH\" timeout 3 redis-cli -p \"$R_PORT\" --no-auth-warning info replication 2>/dev/null | tr -d '\\r' || true)\n")
+	b.WriteString("  else\n")
+	b.WriteString("    R_INFO=$(timeout 3 redis-cli -p \"$R_PORT\" info replication 2>/dev/null | tr -d '\\r' || true)\n")
+	b.WriteString("  fi\n")
 	b.WriteString("  if printf '%s\\n' \"$R_INFO\" | grep -q '^role:master'; then echo 'ROLE|primary'; fi\n")
 	b.WriteString("  if printf '%s\\n' \"$R_INFO\" | grep -q '^role:slave'; then echo 'ROLE|replica'; fi\n")
 	b.WriteString("fi\n")
@@ -949,7 +966,7 @@ func (s *storeServer) ingestCompletedLiveInspectTask(t rehearsalExecTask) {
 		s.syncLiveIntoImportedBaseline(f, merged, firstNonEmptyStr(t.By, "agent"))
 	}
 	if len(merged.Packages) > 0 && s.loadLatestScan() != nil {
-		s.runSecurityScan("live-inspect", false)
+		go s.runSecurityScan("live-inspect", false)
 	}
 }
 

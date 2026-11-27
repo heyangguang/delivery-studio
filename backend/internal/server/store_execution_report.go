@@ -48,7 +48,7 @@ func (s *storeServer) executionSummary(b *docBuilder, level int, j storeJob, pro
 	}
 	runs := []executionRun{}
 	for _, r := range d.Runs {
-		if r.Job == j.ID {
+		if r.Job == j.ID && !r.CheckMode {
 			runs = append(runs, r)
 		}
 	}

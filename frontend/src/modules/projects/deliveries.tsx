@@ -1602,13 +1602,18 @@ export function DeliveryDetail({
     await onChanged();
   };
   const later = false;
+  const isV2 =
+    (input as { schema?: string } | undefined)?.schema === "studio/v2" ||
+    (plan as { schema?: string } | undefined)?.schema === "studio/v2";
   const canRevise =
     job.state === "succeeded" &&
     !job.revised_by &&
-    job.outcome !== "done" &&
-    job.outcome !== "deviated" &&
     job.outcome !== "void" &&
-    cluster.holder === job.id &&
+    (isV2
+      ? true
+      : job.outcome !== "done" &&
+        job.outcome !== "deviated" &&
+        cluster.holder === job.id) &&
     can("delivery.create");
 
   const files0 = files;
@@ -1691,7 +1696,14 @@ export function DeliveryDetail({
         <Button
           icon={<IconEdit />}
           onClick={() =>
-            go({ name: "new", app: job.app_id, revise: job.id })
+            isV2
+              ? go({
+                  name: "components",
+                  v2: job.app_id,
+                  tab: "deliver",
+                  revise: job.id,
+                })
+              : go({ name: "new", app: job.app_id, revise: job.id })
           }
         >
           {bi("修订部署配置", "Revise Config")}

@@ -689,11 +689,19 @@ func (r *executionRunner) execute(w executionWork) error {
 	if tag, _ := w.Step.ExtraVars["__ansible_tags"].(string); strings.TrimSpace(tag) != "" {
 		argv = append(argv, "--tags", strings.TrimSpace(tag))
 	}
+	checkMode, _ := w.Step.ExtraVars["__ansible_check"].(bool)
+	if checkMode {
+		argv = append(argv, "--check", "--diff")
+	}
 	cmd := exec.Command(binary, argv...)
 	cmd.Dir = project
 	hostKeyCheck := "True"
 	if w.Snapshot.Schema == "studio/v2" && len(w.Snapshot.AgentAccess) == 0 {
 		hostKeyCheck = "False"
+	}
+	checkFlag := "0"
+	if checkMode {
+		checkFlag = "1"
 	}
 	stepLogPath := filepath.Join(project, "logs", w.Step.ID+".log")
 	eventLogPath := filepath.Join(project, "logs", w.Step.ID+".jsonl")
@@ -708,6 +716,7 @@ func (r *executionRunner) execute(w executionWork) error {
 		"DELIVERY_STUDIO_PLAYBOOK=" + w.Step.Playbook,
 		"DELIVERY_STUDIO_STEP_LOG=" + stepLogPath,
 		"DELIVERY_STUDIO_EVENT_LOG=" + eventLogPath,
+		"DELIVERY_STUDIO_CHECK_MODE=" + checkFlag,
 	}
 	setProcessGroup(cmd)
 	// Only callback output (honours no_log) is uploaded, never raw stdout.

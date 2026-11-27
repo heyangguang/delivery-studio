@@ -641,21 +641,53 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	var req struct {
 		ansiblev2.RenderRequest
 		ExecutionHost *mwpack.ExecutionHost `json:"execution_host,omitempty"`
+		Revises       string                `json:"revises,omitempty"`
 	}
 	if err := decodeBody(w, r, 4<<20, &req); err != nil {
 		s.fail(w, 400, "参数无效："+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.ClusterID) == "" {
-		req.ClusterID = fmt.Sprintf("%s-%s", name, time.Now().UTC().Format("0102-1504"))
-	}
-	req.ClusterID = ansiblev2.SanitizeName(req.ClusterID)
-	s.mu.Lock()
-	takenMsg := s.clusterTaken(req.ClusterID)
-	s.mu.Unlock()
-	if takenMsg != "" {
-		s.fail(w, 409, takenMsg)
-		return
+	var reviseSrc storeJob
+	var isRevision bool
+	var nextSeq int
+	if revID := strings.TrimSpace(req.Revises); revID != "" {
+		s.mu.Lock()
+		srcJob, exists := s.jobs[revID]
+		maxSeq := 0
+		if exists {
+			for _, other := range s.jobs {
+				if other.ClusterID == srcJob.ClusterID && other.Seq > maxSeq {
+					maxSeq = other.Seq
+				}
+			}
+		}
+		s.mu.Unlock()
+		if !exists {
+			s.fail(w, 404, "待修订的原交付不存在："+revID)
+			return
+		}
+		if s.clusterAccess(session.User)(srcJob.Owner, srcJob.ClusterID) != "operate" {
+			s.fail(w, 403, "无权修订该集群的交付配置")
+			return
+		}
+		reviseSrc = srcJob
+		isRevision = true
+		req.ClusterID = srcJob.ClusterID
+		if srcJob.finished() {
+			nextSeq = maxSeq + 1
+		}
+	} else {
+		if strings.TrimSpace(req.ClusterID) == "" {
+			req.ClusterID = fmt.Sprintf("%s-%s", name, time.Now().UTC().Format("0102-1504"))
+		}
+		req.ClusterID = ansiblev2.SanitizeName(req.ClusterID)
+		s.mu.Lock()
+		takenMsg := s.clusterTaken(req.ClusterID)
+		s.mu.Unlock()
+		if takenMsg != "" {
+			s.fail(w, 409, takenMsg)
+			return
+		}
 	}
 	if req.ExecutionHost != nil && strings.TrimSpace(req.ExecutionHost.Name) != "" && req.Controller == "" {
 		req.Controller = strings.TrimSpace(req.ExecutionHost.Name)
@@ -860,6 +892,10 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	revisesID := ""
+	if isRevision && nextSeq == 0 {
+		revisesID = reviseSrc.ID
+	}
 	job := storeJob{
 		ID:           jobID,
 		Owner:        session.User,
@@ -867,6 +903,8 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		AppName:      rep.Manifest.Title,
 		Version:      rep.Manifest.Version,
 		ClusterID:    res.ClusterID,
+		Revises:      revisesID,
+		Seq:          nextSeq,
 		DeliveryMode: res.DeliveryMode,
 		Scheme:       schemeSummary,
 		State:        "succeeded",
@@ -875,7 +913,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		Updated:      now,
 		Logs: []string{
 			fmt.Sprintf("[1/2] 原生 Ansible 2.0 引擎渲染标准 inventory/hosts.yml 与 group_vars/all.yml（%d 台主机）", len(depHosts)),
-			fmt.Sprintf("[2/2] 打包独立可运行的标准 Ansible 工程 %s（%d 个执行步骤）", archiveName, len(res.Steps)),
+			fmt.Sprintf("[2/2] 打包独立可运行的标准 Ansible 工程 %s（%d 个执行步骤）", archiveName, len(deploySteps)+len(testSteps)+len(cleanupSteps)),
 		},
 	}
 
@@ -887,6 +925,9 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	_ = s.writeJobSpecBytes(jobID, res.ClusterID, specYAML)
 	_ = s.writeJobPlanAndLock(jobID, res.ClusterID, planJSON, lockJSON)
 	s.jobPersistMu.Unlock()
+	if isRevision && nextSeq == 0 {
+		s.supersede(reviseSrc.ID, jobID, session.User)
+	}
 
 	activeSteps := len(deploySteps) + len(testSteps) + len(cleanupSteps)
 	s.auditReq(r, "ansible-v2-deliver", session.User, fmt.Sprintf("%s -> cluster %s (%s)", name, res.ClusterID, jobID))
@@ -896,6 +937,8 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		"archive":     archiveName,
 		"sha256":      sha,
 		"steps_count": activeSteps,
+		"revises":     revisesID,
+		"seq":         nextSeq,
 	})
 }
 

@@ -196,12 +196,14 @@ export function ComponentsPage({
   v2,
   tab,
   scheme,
+  revise,
 }: {
   me: Session;
   selected?: string;
   v2?: string;
   tab?: string;
   scheme?: string;
+  revise?: string;
 }) {
   const lang = useLang();
   const narrow = useMedia("(max-width: 900px)");
@@ -343,6 +345,7 @@ export function ComponentsPage({
         initialName={v2}
         initialTab={tab}
         initialScheme={scheme}
+        initialRevise={revise}
       />
     );
   }

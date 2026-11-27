@@ -105,6 +105,7 @@ type executionRun struct {
 	SyncVersion     int             `json:"sync_version,omitempty"`
 	SafetyConfirmed bool            `json:"safety_confirmed,omitempty"`
 	SafetyWarnings  []string        `json:"safety_warnings,omitempty"`
+	CheckMode       bool            `json:"check_mode,omitempty"`
 }
 type executionDB struct {
 	Agents       map[string]targetAgent          `json:"agents,omitempty"`
@@ -700,7 +701,12 @@ func (s *storeServer) handleExecutionNodes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	executionMu.Lock()
-	defer executionMu.Unlock()
+	execLocked := true
+	defer func() {
+		if execLocked {
+			executionMu.Unlock()
+		}
+	}()
 	d, e := s.readExecutions()
 	if e != nil {
 		s.fail(w, 500, e.Error())
@@ -1024,6 +1030,7 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			Confirm       string   `json:"confirm"`
 			Prepared      bool     `json:"prepared"`
 			ConfirmSafety bool     `json:"confirm_safety"`
+			CheckMode     bool     `json:"check_mode"`
 		}
 		if decodeBody(w, r, 65536, &req) != nil || len(req.Keys) == 0 || len(req.Keys) > 200 || !executionID.MatchString(req.Request) {
 			s.fail(w, 400, "请选择步骤并提供请求标识")
@@ -1134,36 +1141,38 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 		// already carry data directories / active services.
 		var safetyWarnings []string
 		hasMutatingSelected := false
-		for _, key := range req.Keys {
-			c := choices[key]
-			isRisky := c.Effect == "destructive" || c.Effect == "disruptive"
-			if c.Effect != "read-only" {
-				hasMutatingSelected = true
+		if !req.CheckMode {
+			for _, key := range req.Keys {
+				c := choices[key]
+				isRisky := c.Effect == "destructive" || c.Effect == "disruptive"
+				if c.Effect != "read-only" {
+					hasMutatingSelected = true
+				}
+				if isRisky && (c.State == "done" || c.State == "resolved") {
+					safetyWarnings = append(safetyWarnings, fmt.Sprintf("步骤「%s」此前已执行通过，且属于变更/高风险操作（%s），重复执行可能覆盖已有数据或中断服务", c.Title, c.Effect))
+				} else if c.Effect == "destructive" && anyDone {
+					safetyWarnings = append(safetyWarnings, fmt.Sprintf("本交付已在目标机器执行过前置步骤（可能已有初始化数据），即将执行破坏性步骤「%s」", c.Title))
+				}
 			}
-			if isRisky && (c.State == "done" || c.State == "resolved") {
-				safetyWarnings = append(safetyWarnings, fmt.Sprintf("步骤「%s」此前已执行通过，且属于变更/高风险操作（%s），重复执行可能覆盖已有数据或中断服务", c.Title, c.Effect))
-			} else if c.Effect == "destructive" && anyDone {
-				safetyWarnings = append(safetyWarnings, fmt.Sprintf("本交付已在目标机器执行过前置步骤（可能已有初始化数据），即将执行破坏性步骤「%s」", c.Title))
-			}
-		}
-		if hasMutatingSelected && req.Preparation != "" {
-			if prep, ok := d.Preparations[req.Preparation]; ok {
-				for _, ck := range prep.Checks {
-					for _, wm := range ck.Warnings {
-						if !contains(safetyWarnings, wm) {
-							safetyWarnings = append(safetyWarnings, wm)
+			if hasMutatingSelected && req.Preparation != "" {
+				if prep, ok := d.Preparations[req.Preparation]; ok {
+					for _, ck := range prep.Checks {
+						for _, wm := range ck.Warnings {
+							if !contains(safetyWarnings, wm) {
+								safetyWarnings = append(safetyWarnings, wm)
+							}
 						}
 					}
 				}
 			}
-		}
-		if len(safetyWarnings) > 0 && !req.ConfirmSafety {
-			s.writeJSON(w, 409, map[string]any{
-				"error":               "检测到目标机已有数据/运行服务或正在重跑已完成的高风险步骤，请核实后勾选二次安全确认再启动",
-				"need_safety_confirm": true,
-				"safety_warnings":     safetyWarnings,
-			})
-			return
+			if len(safetyWarnings) > 0 && !req.ConfirmSafety {
+				s.writeJSON(w, 409, map[string]any{
+					"error":               "检测到目标机已有数据/运行服务或正在重跑已完成的高风险步骤，请核实后勾选二次安全确认再启动",
+					"need_safety_confirm": true,
+					"safety_warnings":     safetyWarnings,
+				})
+				return
+			}
 		}
 
 		patchedMap := s.patchedFiles(j.ID)
@@ -1192,6 +1201,7 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 			SyncVersion:     len(j.Syncs),
 			SafetyConfirmed: req.ConfirmSafety,
 			SafetyWarnings:  safetyWarnings,
+			CheckMode:       req.CheckMode,
 		}
 		run.ExecutorName = n.Name
 		run.AccessMode = "existing-ssh"
@@ -1224,6 +1234,9 @@ func (s *storeServer) handleExecutions(w http.ResponseWriter, r *http.Request, s
 					if len(fields) > 0 {
 						vars["__ansible_tags"] = strings.TrimSpace(fields[0])
 					}
+				}
+				if req.CheckMode {
+					vars["__ansible_check"] = true
 				}
 				for _, k := range p.ConfirmVars {
 					if !nameRE.MatchString(strings.ReplaceAll(k, "_", "-")) {
@@ -1514,7 +1527,12 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	executionMu.Lock()
-	defer executionMu.Unlock()
+	execLocked := true
+	defer func() {
+		if execLocked {
+			executionMu.Unlock()
+		}
+	}()
 	d, e := s.readExecutions()
 	if e != nil {
 		s.fail(w, 500, e.Error())
@@ -1542,6 +1560,9 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 			s.fail(w, 400, "演练回传格式不正确")
 			return
 		}
+		// Release executionMu before applying rehearsal/live-inspect events so ingest/SBOM/security scan cannot self-deadlock on executionMu.
+		executionMu.Unlock()
+		execLocked = false
 		task, err := s.applyRehearsalExecEvent("node", n.ID, ev)
 		if err != nil {
 			s.fail(w, 409, err.Error())
@@ -1563,7 +1584,7 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.projectExecutionResult(d.Runs[ev.Run], ev.Attempt)
-		if rDone := d.Runs[ev.Run]; rDone.State == "completed" {
+		if rDone := d.Runs[ev.Run]; rDone.State == "completed" && !rDone.CheckMode {
 			s.captureAutoVerificationReports(rDone.Job, d)
 		}
 		state := ""
@@ -1694,6 +1715,10 @@ func (s *storeServer) handleExecutionAgent(w http.ResponseWriter, r *http.Reques
 // progress.json is a compatibility projection. Immutable attempts remain the source
 // of evidence and are not removed by a manual correction or a new execution batch.
 func (s *storeServer) projectExecutionResult(run executionRun, attempt string) {
+	// Dry-run (--check --diff) previews never certify or overwrite real deployment progress.
+	if run.CheckMode {
+		return
+	}
 	// A refresh must never resurrect results invalidated by a newer plan.
 	if run.Revision != "" && run.Revision != s.executionRevision(run.Job) {
 		return

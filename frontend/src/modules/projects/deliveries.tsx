@@ -1696,14 +1696,7 @@ export function DeliveryDetail({
         <Button
           icon={<IconEdit />}
           onClick={() =>
-            isV2
-              ? go({
-                  name: "components",
-                  v2: job.app_id,
-                  tab: "deliver",
-                  revise: job.id,
-                })
-              : go({ name: "new", app: job.app_id, revise: job.id })
+            go({ name: "new", app: job.app_id, revise: job.id })
           }
         >
           {bi("修订部署配置", "Revise Config")}

@@ -170,6 +170,62 @@ function firstPlatform(
   return app.versions.flatMap((v) => v.platforms || []).find(fallback) || preferred;
 }
 
+/** Co-location-aware host sizing & role assignment: exclusive roles occupy distinct hosts; non-exclusive roles (sentinel, etcd) co-locate onto those hosts first. */
+function allocateHostsAndPlacement(
+  roles: ReturnType<typeof rolesOf>,
+  counts: Record<string, number>,
+  existing?: HostSpec[],
+): { hosts: HostSpec[]; placement: Record<string, string[]> } {
+  const exclRoles = roles.filter((r) => r.exclusive);
+  const colocRoles = roles.filter((r) => !r.exclusive);
+  let needed = 0;
+  if (exclRoles.length > 0) {
+    const exclSum = exclRoles.reduce((a, r) => a + (counts[r.name] || 0), 0);
+    const maxColoc = colocRoles.reduce(
+      (m, r) => Math.max(m, counts[r.name] || 0),
+      0,
+    );
+    needed = Math.max(exclSum, maxColoc, 1);
+  } else {
+    const sum = roles.reduce((a, r) => a + (counts[r.name] || 0), 0);
+    needed = Math.max(sum, 1);
+  }
+  const hosts: HostSpec[] = existing ? [...existing] : [];
+  while (hosts.length < needed) {
+    hosts.push({
+      name: hostName(hosts.length),
+      ip: "",
+      disk: "/dev/vdb",
+      initialize: false,
+    });
+  }
+  const placement: Record<string, string[]> = {};
+  if (exclRoles.length > 0) {
+    let next = 0;
+    exclRoles.forEach((r) => {
+      const n = counts[r.name] || 0;
+      placement[r.name] = [];
+      for (let k = 0; k < n; k++)
+        placement[r.name].push(hosts[next++ % hosts.length].name);
+    });
+    colocRoles.forEach((r) => {
+      const n = counts[r.name] || 0;
+      placement[r.name] = [];
+      for (let k = 0; k < n; k++)
+        placement[r.name].push(hosts[k % hosts.length].name);
+    });
+  } else {
+    let next = 0;
+    roles.forEach((r) => {
+      const n = counts[r.name] || 0;
+      placement[r.name] = [];
+      for (let k = 0; k < n; k++)
+        placement[r.name].push(hosts[next++ % hosts.length].name);
+    });
+  }
+  return { hosts, placement };
+}
+
 /** A new deployment of one component, sized by a preset (or by the role defaults). */
 function startDeployment(
   app: AppInfo,
@@ -187,23 +243,7 @@ function startDeployment(
         ? (plan.topology.find((t) => t.role === r.name)?.count ?? 0)
         : (r.default ?? r.min)),
   );
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  const hosts: HostSpec[] = Array.from(
-    { length: Math.max(total, 1) },
-    (_, i) => ({
-      name: hostName(i),
-      ip: "",
-      disk: "/dev/vdb",
-      initialize: false,
-    }),
-  );
-  const placement: Record<string, string[]> = {};
-  let next = 0;
-  roles.forEach((r) => {
-    placement[r.name] = [];
-    for (let k = 0; k < counts[r.name]; k++)
-      placement[r.name].push(hosts[next++ % hosts.length].name);
-  });
+  const { hosts, placement } = allocateHostsAndPlacement(roles, counts);
   const pl = platform || firstPlatform(app, "ubuntu-24.04-amd64", [], verify);
   const versions = versionsFor(app, pl, verify);
   const version =
@@ -365,6 +405,10 @@ const tabLabel = (tab: string): string => {
       return bi("基础", "Basic");
     case "ha":
       return bi("高可用", "HA");
+    case "security":
+      return bi("安全与凭据", "Security");
+    case "tuning":
+      return bi("性能与存储", "Tuning");
     case "database":
       return bi("数据库", "Database");
     case "backup":
@@ -785,7 +829,10 @@ function DeliveryForm({
   // a component's status changed elsewhere (published, verified): what the form says about it follows
   const [appsTick, setAppsTick] = useState(0);
   useEffect(() => {
-    const h = () => setAppsTick((n) => n + 1);
+    const h = () => {
+      schemas.clear();
+      setAppsTick((n) => n + 1);
+    };
     window.addEventListener("mh-apps-changed", h);
     window.addEventListener("focus", h);
     return () => {
@@ -931,7 +978,8 @@ function DeliveryForm({
     changePlan(p);
   }
   function changePlan(p: AppPlan, remove = new Set<string>()) {
-    const count = p.topology.reduce((total, role) => total + role.count, 0);
+    const freshPreview = startDeployment(app, p);
+    const count = freshPreview.hosts.length;
     const retained = new Set(dep.hosts.slice(0, count).map((h) => h.name));
     for (const instance of dep.instances.slice(1)) {
       if (!remove.has(instance.id))
@@ -963,16 +1011,16 @@ function DeliveryForm({
   function commitPlan(p: AppPlan, remove = new Set<string>()) {
     setPlan(p.id);
     setDep((d) => {
-      const fresh = startDeployment(app, p);
-      const hosts = growHosts({ ...d, hosts: d.hosts }, fresh.hosts.length);
-      const placement: Record<string, string[]> = {};
-      let next = 0;
-      rolesOf(app).forEach((r) => {
-        const n = p.topology.find((t) => t.role === r.name)?.count ?? 0;
-        placement[r.name] = [];
-        for (let k = 0; k < n; k++)
-          placement[r.name].push(hosts[next++ % hosts.length].name);
+      const roles = rolesOf(app);
+      const counts: Record<string, number> = {};
+      roles.forEach((r) => {
+        counts[r.name] = p.topology.find((t) => t.role === r.name)?.count ?? 0;
       });
+      const { hosts, placement } = allocateHostsAndPlacement(
+        roles,
+        counts,
+        d.hosts,
+      );
       const instances = d.instances
         .filter((i) => !remove.has(i.id))
         .map((i, ix) =>
@@ -1281,10 +1329,11 @@ function DeliveryForm({
 
   /* ---- render helpers ---- */
 
-  /** Evaluates simple `params.<key>` `when` guards locally for 0ms optimistic show/hide on switch/enum toggles. */
+  /** Evaluates `params.<key>` and Ansible `group.<name>` `when` guards locally for 0ms optimistic show/hide on switch/enum/topology toggles. */
   function evalOptimisticWhen(
     expr: string | undefined,
     params: Record<string, unknown>,
+    placement: Record<string, string[]> | undefined,
     serverVisible: boolean,
   ): boolean {
     if (!expr) return serverVisible;
@@ -1296,7 +1345,25 @@ function DeliveryForm({
     let evaluatedAny = false;
     let sawComplex = false;
     for (const part of parts) {
-      let m = /^params\.([A-Za-z0-9_]+)$/.exec(part);
+      let m = /^group\.([A-Za-z0-9_-]+)\s*(==|!=|>|>=|<|<=)\s*(\d+)$/.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        const cnt = (placement?.[m[1]] || []).length;
+        const target = Number(m[3]);
+        const op = m[2];
+        if (
+          (op === "==" && !(cnt === target)) ||
+          (op === "!=" && !(cnt !== target)) ||
+          (op === ">" && !(cnt > target)) ||
+          (op === ">=" && !(cnt >= target)) ||
+          (op === "<" && !(cnt < target)) ||
+          (op === "<=" && !(cnt <= target))
+        ) {
+          return false;
+        }
+        continue;
+      }
+      m = /^params\.([A-Za-z0-9_]+)$/.exec(part);
       if (m) {
         evaluatedAny = true;
         if (!params[m[1]]) return false;
@@ -1306,6 +1373,14 @@ function DeliveryForm({
       if (m) {
         evaluatedAny = true;
         if (params[m[1]]) return false;
+        continue;
+      }
+      m = /^params\.([A-Za-z0-9_]+)\s*(==|!=)\s*(true|false)$/i.exec(part);
+      if (m) {
+        evaluatedAny = true;
+        const actual = Boolean(params[m[1]]);
+        const expected = m[3].toLowerCase() === "true";
+        if (m[2] === "==" ? actual !== expected : actual === expected) return false;
         continue;
       }
       m = /^params\.([A-Za-z0-9_]+)\s*(==|!=)\s*['"]([^'"]*)['"]$/.exec(part);
@@ -1371,6 +1446,7 @@ function DeliveryForm({
       return evalOptimisticWhen(
         d.when,
         resolvedParams,
+        inst.placement,
         view?.visible?.[d.key] !== false,
       );
     };
@@ -2934,7 +3010,14 @@ function DeliveryForm({
                 const isSelected = p.contract
                   ? instView(main?.id || "")?.contract?.when === p.contract.when
                   : plan === p.id;
-                const nodeCount = p.topology.reduce((s, t) => s + t.count, 0);
+                const planCounts: Record<string, number> = {};
+                p.topology.forEach((t) => {
+                  planCounts[t.role] = t.count;
+                });
+                const nodeCount = p.topology.length
+                  ? allocateHostsAndPlacement(rolesOf(app), planCounts).hosts
+                      .length
+                  : 0;
                 return (
                   <button
                     key={p.id}

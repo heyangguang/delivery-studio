@@ -1311,7 +1311,7 @@ export function AppsPage({
                         <div className="tile2-title">
                           <a
                             className="tile2-link"
-                            href={`#/components?v2=${encodeURIComponent(c.name)}&tab=overview`}
+                            href={`#/apps/${encodeURIComponent(c.name)}`}
                           >
                             {title}
                           </a>
@@ -1345,10 +1345,9 @@ export function AppsPage({
                                     style={{ whiteSpace: "nowrap" }}
                                     onClick={() =>
                                       go({
-                                        name: "components",
-                                        v2: c.name,
-                                        tab: "deliver",
-                                        scheme: sc.id,
+                                        name: "new",
+                                        app: c.name,
+                                        plan: sc.id,
                                       })
                                     }
                                   >
@@ -1398,7 +1397,7 @@ export function AppsPage({
                               style={{ whiteSpace: "nowrap" }}
                               icon={<IconPlus />}
                               onClick={() =>
-                                go({ name: "components", v2: c.name, tab: "deliver" })
+                                go({ name: "new", app: c.name })
                               }
                             >
                               {bi("立即交付", "Deliver")}

@@ -37,7 +37,7 @@ vrrp_instance VI_STUDIO {
         auth_pass {{ keepalived_auth_pass[:8] }}
     }
     virtual_ipaddress {
-        {{ keepalived_vip }}
+        {{ keepalived_vip if '/' in (keepalived_vip | string) else (keepalived_vip ~ '/' ~ keepalived_vip_prefix) }}
     }
 {% if keepalived_check_process | default('') | length > 0 %}
     track_script {

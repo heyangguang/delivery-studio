@@ -11,6 +11,10 @@ argument_specs:
         type: int
         default: 5000
         description: 对外业务入口端口
+      haproxy_stats_enabled:
+        type: bool
+        default: true
+        description: 是否启用内置 Stats 监控面板（/stats）
       haproxy_stats_port:
         type: int
         default: 8404
@@ -33,6 +37,18 @@ argument_specs:
         type: list
         default: ["127.0.0.1:8080"]
         description: 后端目标服务器地址列表（每行 IP:Port）
+      haproxy_check_interval:
+        type: str
+        default: "3s"
+        description: 后端健康检查探测间隔（inter）
+      haproxy_check_fall:
+        type: int
+        default: 3
+        description: 连续失败多少次摘除后端节点（fall）
+      haproxy_check_rise:
+        type: int
+        default: 2
+        description: 连续成功多少次恢复后端节点（rise）
       haproxy_timeout_connect:
         type: str
         default: "5s"

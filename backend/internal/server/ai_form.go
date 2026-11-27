@@ -313,6 +313,17 @@ func (c *formCtx) run(name, args string) string {
 		return c.placeCertificate(a)
 	case "list_components":
 		var b strings.Builder
+		b.WriteString("【Ansible 2.0 原生组件（优先推荐，100% 标准 Ansible）】\n")
+		for _, n := range c.s.allV2ComponentNames() {
+			if sc, ok := c.s.ansibleV2Schema(n, langZhCN); ok {
+				var rNames []string
+				for _, r := range sc.Roles {
+					rNames = append(rNames, r.Name)
+				}
+				fmt.Fprintf(&b, "- %s（%s，版本 %s，分组：%s，变量数：%d）\n", n, sc.Title, sc.Version, strings.Join(rNames, "/"), len(sc.Params))
+			}
+		}
+		b.WriteString("\n【v1 兼容组件】\n")
 		for _, n := range cat.Names() {
 			comp, _ := cat.Get(n)
 			var vs []string
@@ -330,6 +341,9 @@ func (c *formCtx) run(name, args string) string {
 		}
 		return b.String()
 	case "describe_component":
+		if brief, _, ok := c.s.ansibleV2ComponentBrief(str("name")); ok {
+			return brief
+		}
 		text, _, err := componentBrief(cat, str("name"), str("version"))
 		if err != nil {
 			return err.Error() + "。可以先用 list_components 查看有哪些组件。"
@@ -345,9 +359,11 @@ func (c *formCtx) run(name, args string) string {
 				return "当前流程不允许切换组件。已有交付的复制、变更或修订必须保留原应用。"
 			}
 			target = str("target_component")
-			comp, ok := cat.Get(target)
-			if !ok || comp.Kind == "external" || comp.Context != "" {
-				return "目标不是可独立部署的组件，请先查询组件目录。"
+			if !c.s.isAnsibleV2Component(target) {
+				comp, ok := cat.Get(target)
+				if !ok || comp.Kind == "external" || comp.Context != "" {
+					return "目标不是可独立部署的组件，请先查询组件目录。"
+				}
 			}
 			if target == c.app {
 				return "已经是这个组件，请使用fill_form。"
@@ -404,32 +420,61 @@ func (c *formCtx) run(name, args string) string {
 				return why + "。没有填入表单。请换一个没被用过的集群标识（小写字母、数字、短横线），再调用 fill_form，并把这个情况告诉用户。"
 			}
 		}
-		plan := mwpack.Solve(cat, d)
-		// what is still for the person to supply is not an objection: a missing address or a certificate to upload
-		var blocking, rest []string
-		for _, p := range plan.Errors() {
-			if strings.Contains(p.Path, ".ip") || strings.Contains(p.Message, "IP") || strings.Contains(p.Message, "证书") {
-				rest = append(rest, p.Message)
-				continue
-			}
-			blocking = append(blocking, p.Message)
-		}
-		if len(blocking) > 0 {
-			return "平台校验没有通过，这份规格没有填入表单。请修正后再调用 fill_form：\n- " + strings.Join(blocking, "\n- ")
-		}
-		summary := truncRunes(strings.TrimSpace(str("summary")), 120)
+		var blocking, rest, warn []string
 		var baselines []formBaseline
 		baselineChecked := false
-		if name == "fill_form" {
-			baselines = evaluateFormBaselines(plan, d)
-			if len(a["baseline_notes"]) > 0 {
+		if v2Plan, ok2 := c.s.resolveAnsibleV2Deployment(d, langZhCN); ok2 {
+			for _, p := range v2Plan.Issues {
+				if p.Severity == "warning" {
+					warn = append(warn, p.Message)
+					continue
+				}
+				if strings.Contains(p.Path, ".ip") || strings.Contains(p.Message, "IP") || strings.Contains(p.Message, "证书") {
+					rest = append(rest, p.Message)
+					continue
+				}
+				blocking = append(blocking, p.Message)
+			}
+			if len(blocking) > 0 {
+				return "平台校验没有通过，这份规格没有填入表单。请修正后再调用 fill_form：\n- " + strings.Join(blocking, "\n- ")
+			}
+			if name == "fill_form" && len(a["baseline_notes"]) > 0 {
 				var extra []formBaseline
 				if json.Unmarshal(a["baseline_notes"], &extra) == nil && len(extra) > 0 {
 					baselines = mergeAIBaselines(baselines, extra)
+					baselineChecked = true
 				}
 			}
-			baselineChecked = true
+		} else {
+			plan := mwpack.Solve(cat, d)
+			// what is still for the person to supply is not an objection: a missing address or a certificate to upload
+			for _, p := range plan.Errors() {
+				if strings.Contains(p.Path, ".ip") || strings.Contains(p.Message, "IP") || strings.Contains(p.Message, "证书") {
+					rest = append(rest, p.Message)
+					continue
+				}
+				blocking = append(blocking, p.Message)
+			}
+			if len(blocking) > 0 {
+				return "平台校验没有通过，这份规格没有填入表单。请修正后再调用 fill_form：\n- " + strings.Join(blocking, "\n- ")
+			}
+			if name == "fill_form" {
+				baselines = evaluateFormBaselines(plan, d)
+				if len(a["baseline_notes"]) > 0 {
+					var extra []formBaseline
+					if json.Unmarshal(a["baseline_notes"], &extra) == nil && len(extra) > 0 {
+						baselines = mergeAIBaselines(baselines, extra)
+					}
+				}
+				baselineChecked = true
+			}
+			for _, p := range plan.Issues {
+				if p.Severity == "warning" && !strings.Contains(p.Message, "尚未在空环境验证") {
+					warn = append(warn, p.Message)
+				}
+			}
 		}
+		summary := truncRunes(strings.TrimSpace(str("summary")), 120)
 		c.filled = &formFill{
 			Summary:         summary,
 			Deployment:      d,
@@ -443,12 +488,6 @@ func (c *formCtx) run(name, args string) string {
 		}
 		c.state.Deployment = d
 		c.ev.send(map[string]any{"t": "form", "v": c.filled})
-		var warn []string
-		for _, p := range plan.Issues {
-			if p.Severity == "warning" && !strings.Contains(p.Message, "尚未在空环境验证") {
-				warn = append(warn, p.Message)
-			}
-		}
 		out := "已填入表单，用户正在看着它被填上。"
 		if len(rest) > 0 {
 			out += "\n还需要用户补充（在回复里告诉他）：\n- " + strings.Join(rest, "\n- ")
@@ -464,8 +503,10 @@ func (c *formCtx) run(name, args string) string {
 	return "没有这个工具：" + name
 }
 
-const formSystem = `你是 Kyndryl Delivery Studio（离线中间件交付平台）的填表助手，在「新建交付」页面和用户对话，帮他把部署表单填好。
-- PostgreSQL 主从架构必须由用户明确选择。只说主从、一主一从、一主多从、高可用时，必须先用 ask_user 卡片询问「原生主从方案」或「Patroni 主从方案」，不能默认选择任何一个。明确选择后才调用 fill_form；历史默认值、机器数量和AI填入值不算用户确认。原生方案人工切换，Patroni方案自动切换并由平台部署etcd。
+const formSystem = `你是 Kyndryl Delivery Studio 2.0（原生 Ansible 驱动的中件间与基础设施交付平台）的填表助手，在「新建交付」页面和用户对话，帮他把部署表单填好。
+- 平台全面采用原生 Ansible 2.0 组件引擎：所有内置组件（patroni-native、postgresql-native、redis-native、etcd-native、nginx-native、haproxy-native、keepalived-native、external-lb-native）及用户导入的任意标准 Role/Collection/Playbook 的表单分组、变量类型、默认值与条件显现规则均自动解析自 Ansible 源码（meta/argument_specs.yml、defaults/main.yml、group_vars/all.yml 与 when/Jinja2 条件）。写规格前务必调用 describe_component 获取该组件最新的动态变量与分组名，绝不凭记忆编造。
+- 支持 offline（标准离线 Ansible 工程 .tar.gz + SHA256SUMS，可脱离平台直接 ansible-playbook 执行）与 automatic（通过执行中心在 Linux 控制节点全自动编排并支持 --check --diff 差异预演）两种交付模式。
+- PostgreSQL 主从架构（v1 postgresql 或 2.0 postgresql-native vs patroni-native）必须由用户明确选择：只说主从、一主一从、一主多从、高可用时，必须先用 ask_user 卡片询问「原生主从方案（人工切换）」或「Patroni 高可用方案（自动故障切换 + etcd 仲裁）」，不能擅自代选。
 - 用工具查实际内容：read_form 读表单，list_components、describe_component 查组件能写什么，fill_form 写入表单。不要凭记忆编造组件的角色、参数或端口。公共机器参数由read_form返回，写入hosts[].params，按联动规则清理冲突磁盘字段。
 - 用户进入错误组件页面时，不要反复拒绝或声称只能手工返回。用户明确要求Redis等其他组件，就读取目标组件定义，用switch_form切换并沿用IP、环境和节点需求；意图不明确才提问。切换成功后结束本轮，页面会保留对话并进入目标组件。
 - 你只改表单这份草稿；生成交付要用户自己在表单里确认。每次填完，页面会请用户确认一次你的全部改动。

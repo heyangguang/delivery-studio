@@ -78,6 +78,37 @@ func TestBuiltinComponentsInspectAndRender(t *testing.T) {
 			t.Fatalf("PackTarGz failed: err=%v len=%d sha=%s", err, len(tgz), sha)
 		}
 	}
+
+	// Verify AST-driven dynamic conditional visibility (zero hardcoding!)
+	checkWhen := func(comp, varKey, wantWhen string) {
+		t.Helper()
+		files, ok := LoadBuiltinFiles(comp)
+		if !ok {
+			t.Fatalf("missing builtin %s", comp)
+		}
+		rep := Inspect(files, comp, "builtin")
+		for _, v := range rep.Vars {
+			if v.Key == varKey {
+				if v.When != wantWhen {
+					t.Fatalf("%s var %s: expected auto-inferred when=%q, got %q", comp, varKey, wantWhen, v.When)
+				}
+				if v.Group == "" || v.GroupLabel == "" {
+					t.Fatalf("%s var %s: expected auto-inferred group & label, got %+v", comp, varKey, v)
+				}
+				return
+			}
+		}
+		t.Fatalf("%s missing var %s in inspected vars", comp, varKey)
+	}
+	checkWhen("haproxy-native", "haproxy_stats_port", "haproxy_stats_enabled == true")
+	checkWhen("nginx-native", "nginx_proxy_timeout", "nginx_proxy_mode == 'stream'")
+	checkWhen("redis-native", "redis_vm_overcommit_memory", "redis_apply_baseline == true")
+	checkWhen("postgresql-native", "postgresql_vm_swappiness", "postgresql_apply_baseline == true")
+	checkWhen("patroni-native", "patroni_synchronous_commit", "patroni_synchronous_mode == true")
+	checkWhen("patroni-native", "patroni_vm_swappiness", "patroni_apply_baseline == true")
+	checkWhen("patroni-native", "patroni_external_etcd_hosts", "group.etcd == 0")
+	checkWhen("external-lb-native", "elb_health_check_path", "elb_health_check_type == 'http'")
+	checkWhen("external-lb-native", "elb_resolve_ip", "elb_mode == 'domain'")
 }
 
 func TestInspectAllFourMarketAnsibleFormats(t *testing.T) {

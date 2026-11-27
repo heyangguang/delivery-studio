@@ -28,6 +28,14 @@ argument_specs:
         type: list
         default: ["127.0.0.1:5432"]
         description: 后端上游地址列表（IP:Port）
+      nginx_upstream_max_fails:
+        type: int
+        default: 3
+        description: 上游节点连续失败摘除阈值（max_fails）
+      nginx_upstream_fail_timeout:
+        type: str
+        default: "15s"
+        description: 上游节点失败熔断时长（fail_timeout）
       nginx_proxy_connect_timeout:
         type: str
         default: "5s"
@@ -35,7 +43,11 @@ argument_specs:
       nginx_proxy_read_timeout:
         type: str
         default: "60s"
-        description: 上游读写超时
+        description: 七层 HTTP 上游读写超时
+      nginx_proxy_timeout:
+        type: str
+        default: "300s"
+        description: 四层 Stream 连接转发超时（proxy_timeout）
       nginx_enable_access_log:
         type: bool
         default: true

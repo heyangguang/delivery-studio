@@ -5,3 +5,9 @@ etcd_peer_port: 2380
 etcd_data_dir: "/var/lib/etcd/studio"
 etcd_quota_backend_bytes: 4294967296
 etcd_auto_compaction_retention: "1"
+etcd_heartbeat_interval: 100
+etcd_election_timeout: 1000
+etcd_max_snapshots: 5
+etcd_max_wals: 5
+etcd_log_level: "info"
+etcd_nofile: 65535

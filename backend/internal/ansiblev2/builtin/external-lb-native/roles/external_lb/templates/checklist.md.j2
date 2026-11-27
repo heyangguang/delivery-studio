@@ -5,7 +5,7 @@
 ## 1. 入口监听配置
 - **负载均衡产品**：{{ elb_vendor }}
 - **入口方式**：{{ elb_mode }}
-- **前端入口地址**：`{{ elb_address }}`{% if elb_resolve_ip %}（期望解析 IP：`{{ elb_resolve_ip }}`）{% endif %}
+- **前端入口地址**：`{{ elb_address }}`{% if elb_mode == 'domain' %}（期望解析 IP：`{{ elb_resolve_ip | default('未指定') }}`）{% endif %}
 - **协议 / 端口**：`{{ elb_protocol | upper }}` / `{{ elb_frontend_port }}`
 
 ## 2. 后端服务器池（Backend Pool）

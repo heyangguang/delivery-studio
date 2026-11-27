@@ -24,20 +24,34 @@ bootstrap:
     ttl: {{ patroni_ttl }}
     loop_wait: {{ patroni_loop_wait }}
     retry_timeout: {{ patroni_retry_timeout }}
-    maximum_lag_on_failover: 1048576
+    maximum_lag_on_failover: {{ patroni_maximum_lag_on_failover }}
     synchronous_mode: {{ patroni_synchronous_mode | bool | lower }}
-    synchronous_mode_strict: false
+{% if patroni_synchronous_mode %}
+    synchronous_mode_strict: {{ patroni_synchronous_mode_strict | bool | lower }}
+    synchronous_node_count: {{ patroni_synchronous_node_count }}
+{% endif %}
     postgresql:
       use_pg_rewind: true
       use_slots: true
       parameters:
         max_connections: {{ patroni_max_connections }}
         shared_buffers: {{ patroni_shared_buffers }}
+        effective_cache_size: {{ patroni_effective_cache_size }}
+        maintenance_work_mem: {{ patroni_maintenance_work_mem }}
+        work_mem: {{ patroni_work_mem }}
         wal_level: replica
         hot_standby: "on"
-        wal_keep_size: 256MB
-        max_wal_senders: 10
-        max_replication_slots: 10
+        hot_standby_feedback: {{ '"on"' if (patroni_hot_standby_feedback | bool) else '"off"' }}
+        wal_keep_size: {{ patroni_wal_keep_size }}
+        max_wal_size: {{ patroni_max_wal_size }}
+        checkpoint_completion_target: {{ patroni_checkpoint_completion_target }}
+        max_wal_senders: {{ patroni_max_wal_senders }}
+        max_replication_slots: {{ patroni_max_replication_slots }}
+        log_min_duration_statement: {{ patroni_log_min_duration_statement }}
+        timezone: {{ patroni_timezone }}
+{% if patroni_synchronous_mode %}
+        synchronous_commit: {{ patroni_synchronous_commit }}
+{% endif %}
         wal_log_hints: "on"
         password_encryption: scram-sha-256
   initdb:
@@ -49,6 +63,9 @@ bootstrap:
     - host replication {{ patroni_replication_user }} {{ patroni_client_cidr }} scram-sha-256
     - host all all 127.0.0.1/32 scram-sha-256
     - host all all {{ patroni_client_cidr }} scram-sha-256
+{% for extra_cidr in (patroni_extra_client_cidrs | default([])) %}
+    - host all all {{ extra_cidr }} scram-sha-256
+{% endfor %}
 
 postgresql:
   listen: 0.0.0.0:{{ patroni_pg_port }}
@@ -70,6 +87,11 @@ postgresql:
     unix_socket_directories: '/var/run/postgresql'
     max_connections: {{ patroni_max_connections }}
     shared_buffers: {{ patroni_shared_buffers }}
+    effective_cache_size: {{ patroni_effective_cache_size }}
+    maintenance_work_mem: {{ patroni_maintenance_work_mem }}
+    work_mem: {{ patroni_work_mem }}
+    log_min_duration_statement: {{ patroni_log_min_duration_statement }}
+    timezone: {{ patroni_timezone }}
 
 tags:
   nofailover: false

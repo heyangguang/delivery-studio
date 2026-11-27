@@ -5,8 +5,12 @@ argument_specs:
     options:
       keepalived_vip:
         type: str
-        default: "192.168.31.199/24"
-        description: 漂移虚拟 IP 及掩码（CIDR 格式，例如 192.168.31.199/24）
+        default: "192.168.31.199"
+        description: 漂移虚拟 IP（支持纯 IP 或带掩码 CIDR）
+      keepalived_vip_prefix:
+        type: int
+        default: 24
+        description: 虚拟 IP 子网掩码前缀长度（如 24；若 VIP 已含 / 掩码则自动忽略）
       keepalived_interface:
         type: str
         default: "auto"

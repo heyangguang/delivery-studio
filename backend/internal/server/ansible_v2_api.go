@@ -159,6 +159,8 @@ func (s *storeServer) handleAnsibleV2(w http.ResponseWriter, r *http.Request, se
 	}
 
 	switch {
+	case len(parts) == 1 && parts[0] == "catalog" && r.Method == "GET":
+		s.writeJSON(w, 200, s.ansibleV2CatalogEntries(wLang(w)))
 	case len(parts) == 1 && parts[0] == "components" && r.Method == "GET":
 		s.listAnsibleV2Components(w)
 	case len(parts) == 1 && parts[0] == "inspect" && r.Method == "POST":
@@ -629,23 +631,33 @@ func (s *storeServer) exportAnsibleV2(w http.ResponseWriter, name string) {
 	_, _ = w.Write(tgz)
 }
 
+type ansibleV2DeliverInput struct {
+	ansiblev2.RenderRequest
+	ExecutionHost *mwpack.ExecutionHost `json:"execution_host,omitempty"`
+	Revises       string                `json:"revises,omitempty"`
+}
+
 // deliverAnsibleV2 renders a 100% standalone standard Ansible 2.0 delivery project, persists
 // it as a first-class Delivery Studio job (plan.json + deployment.yml + tar.gz archive),
 // so the engineer can immediately open the interactive Runbook, download the bundle, or run it.
 func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, session storeSession, name string) {
-	files, src, ok := s.loadV2Component(name)
-	if !ok {
-		s.fail(w, 404, "组件不存在："+name)
-		return
-	}
-	var req struct {
-		ansiblev2.RenderRequest
-		ExecutionHost *mwpack.ExecutionHost `json:"execution_host,omitempty"`
-		Revises       string                `json:"revises,omitempty"`
-	}
+	var req ansibleV2DeliverInput
 	if err := decodeBody(w, r, 4<<20, &req); err != nil {
 		s.fail(w, 400, "参数无效："+err.Error())
 		return
+	}
+	_, resp, code, errMsg := s.executeAnsibleV2Deliver(r, session, name, req)
+	if code != 0 {
+		s.fail(w, code, errMsg)
+		return
+	}
+	s.writeJSON(w, 201, resp)
+}
+
+func (s *storeServer) executeAnsibleV2Deliver(r *http.Request, session storeSession, name string, req ansibleV2DeliverInput) (storeJob, map[string]any, int, string) {
+	files, src, ok := s.loadV2Component(name)
+	if !ok {
+		return storeJob{}, nil, 404, "组件不存在：" + name
 	}
 	var reviseSrc storeJob
 	var isRevision bool
@@ -663,12 +675,10 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		}
 		s.mu.Unlock()
 		if !exists {
-			s.fail(w, 404, "待修订的原交付不存在："+revID)
-			return
+			return storeJob{}, nil, 404, "待修订的原交付不存在：" + revID
 		}
 		if s.clusterAccess(session.User)(srcJob.Owner, srcJob.ClusterID) != "operate" {
-			s.fail(w, 403, "无权修订该集群的交付配置")
-			return
+			return storeJob{}, nil, 403, "无权修订该集群的交付配置"
 		}
 		reviseSrc = srcJob
 		isRevision = true
@@ -685,8 +695,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		takenMsg := s.clusterTaken(req.ClusterID)
 		s.mu.Unlock()
 		if takenMsg != "" {
-			s.fail(w, 409, takenMsg)
-			return
+			return storeJob{}, nil, 409, takenMsg
 		}
 	}
 	if req.ExecutionHost != nil && strings.TrimSpace(req.ExecutionHost.Name) != "" && req.Controller == "" {
@@ -695,8 +704,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	rep := ansiblev2.Inspect(files, name, src)
 	res, err := ansiblev2.Render(files, rep.Manifest, req.RenderRequest)
 	if err != nil {
-		s.fail(w, 400, err.Error())
-		return
+		return storeJob{}, nil, 400, err.Error()
 	}
 
 	jobID := randomStoreToken(16)
@@ -704,18 +712,15 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 	archiveName := fmt.Sprintf("%s-ansible-v2.tar.gz", res.ClusterID)
 	tgz, sha, err := ansiblev2.PackTarGz(res.ClusterID, res.Files)
 	if err != nil {
-		s.fail(w, 500, "生成标准 Ansible 交付包失败："+err.Error())
-		return
+		return storeJob{}, nil, 500, "生成标准 Ansible 交付包失败：" + err.Error()
 	}
 
 	outDir := filepath.Join(s.jobDir(jobID), "output")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		s.fail(w, 500, "创建交付目录失败："+err.Error())
-		return
+		return storeJob{}, nil, 500, "创建交付目录失败：" + err.Error()
 	}
 	if err := os.WriteFile(filepath.Join(outDir, archiveName), tgz, 0o644); err != nil {
-		s.fail(w, 500, "写入交付包失败："+err.Error())
-		return
+		return storeJob{}, nil, 500, "写入交付包失败：" + err.Error()
 	}
 	sums := fmt.Sprintf("%s  %s\n", sha, archiveName)
 	_ = os.WriteFile(filepath.Join(outDir, "SHA256SUMS"), []byte(sums), 0o644)
@@ -931,7 +936,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 
 	activeSteps := len(deploySteps) + len(testSteps) + len(cleanupSteps)
 	s.auditReq(r, "ansible-v2-deliver", session.User, fmt.Sprintf("%s -> cluster %s (%s)", name, res.ClusterID, jobID))
-	s.writeJSON(w, 201, map[string]any{
+	return job, map[string]any{
 		"job_id":      jobID,
 		"cluster_id":  res.ClusterID,
 		"archive":     archiveName,
@@ -939,7 +944,7 @@ func (s *storeServer) deliverAnsibleV2(w http.ResponseWriter, r *http.Request, s
 		"steps_count": activeSteps,
 		"revises":     revisesID,
 		"seq":         nextSeq,
-	})
+	}, 0, ""
 }
 
 // resolveV2StepHosts maps an Ansible play hosts pattern (e.g. "nginx", "primary:replica", "all", "localhost")

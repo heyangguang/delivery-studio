@@ -45,7 +45,7 @@ func TestBuiltinSkillsMatchCurrentPlatformBoundaries(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 21 || !seen["automatic-execution"] || !seen["change-rehearsal"] || !seen["redis-sentinel"] || !seen["nginx-stream"] || !seen["middleware-logging-observability"] || !seen["security-cve-audit"] {
+	if len(seen) != 22 || !seen["ansible-v2-standards"] || !seen["automatic-execution"] || !seen["change-rehearsal"] || !seen["redis-sentinel"] || !seen["nginx-stream"] || !seen["middleware-logging-observability"] || !seen["security-cve-audit"] {
 		t.Fatalf("audit coverage changed: %d skills; review new entries", len(seen))
 	}
 	for _, sk := range builtinSkills() {

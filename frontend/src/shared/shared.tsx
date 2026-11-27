@@ -211,7 +211,11 @@ export type ParamDef = {
     | "cidr"
     | "cidr-list"
     | "ip"
-    | "host";
+    | "host"
+    | "list"
+    | "dict"
+    | "secret"
+    | "path";
   default?: unknown;
   min?: unknown;
   max?: unknown;

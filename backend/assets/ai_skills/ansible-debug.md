@@ -5,12 +5,10 @@ description: Ansible playbook 失败时读懂报错、定位原因：主机不�
 ---
 # Ansible 报错排查
 
-## 平台离线命令入口（必须遵守）
-- 本平台交付只提供 bin/ansible-playbook 和 bin/ansible-inventory，没有 bin/ansible；也不能假设系统 PATH 中有 ansible。
-- 先读取当前交付手册或 controllerFacts，确认项目目录、控制节点、inventory 和实际 playbook 路径。执行时使用 cd 到项目目录后的 ../../bin/ansible-playbook 或已核实的绝对路径；查看清单用 ../../bin/ansible-inventory -i inventory/hosts.yml --graph。
-- 不得生成裸 ansible 或 /root/middleware-automation/bin/ansible 命令。ansible-playbook 不能接收 ad-hoc 的 -m/-a 参数，不能机械替换命令名。
-- 单机排查：明确告诉用户在哪台目标机器上执行，并提供该机直接执行的只读 shell 命令。需要跨机器检查时优先使用已存在且已核实的 playbook；确需临时 playbook 则必须给出完整 YAML、保存位置和调用命令，不要虚构已存在的文件。
-- 旧对话、知识库或用户截图中出现 bin/ansible 不代表该入口存在；应纠正旧命令，不要沿用。
+## 平台命令入口（2.0 原生优先，兼容 v1 离线包）
+- **Ansible 2.0 原生交付（现行标准）**：交付包解压后为 100% 标准 Ansible 工程（含 `ansible.cfg`、`inventory/hosts.yml`、`inventory/group_vars/all.yml`、`playbooks/{deploy,verify,probe,cleanup}.yml`），控制节点直接使用 `ansible-playbook -i inventory/hosts.yml playbooks/deploy.yml` 与 `ansible-inventory -i inventory/hosts.yml --graph`；支持 `--check --diff` 预演配置差异（敏感字段需在任务上加 `no_log: true`）。
+- **v1 兼容离线交付包**：若交付手册明确提供独立打包运行时，使用手册核实后的 `../../bin/ansible-playbook` 和 `../../bin/ansible-inventory`（没有 bin/ansible）。
+- **通用排障铁律**：不得臆造 `ansible -m/-a` ad-hoc 命令或虚构不存在的 playbook；单机排查直接给目标机只读 Shell 命令，跨机排查使用已核实的 `playbooks/probe.yml` / `playbooks/verify.yml`。
 
 先确定失败属于哪一类，再查对应的东西。不要一上来就重跑整个 playbook。
 

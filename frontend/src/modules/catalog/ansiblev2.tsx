@@ -91,10 +91,17 @@ type VarSpec = {
   label?: string;
   label_en?: string;
   group?: string;
+  group_label?: string;
+  group_label_en?: string;
   type?: string;
   default?: unknown;
   required?: boolean;
   choices?: string[];
+  when?: string;
+  advanced?: boolean;
+  unit?: string;
+  min?: number;
+  max?: number;
   description?: string;
   source?: string;
 };
@@ -555,7 +562,10 @@ export function AnsibleV2Studio({
               initialScheme={activeSummary.name === initialName ? initialScheme : undefined}
               initialRevise={activeSummary.name === initialName ? initialRevise : undefined}
               onBack={() => setSelected("")}
-              onChanged={(nextSelect) => void reload(nextSelect)}
+              onChanged={(nextSelect) => {
+                void reload(nextSelect);
+                window.dispatchEvent(new Event("mh-apps-changed"));
+              }}
             />
           ) : (
             <div className="detail-none enter">
@@ -591,6 +601,7 @@ export function AnsibleV2Studio({
         onImported={(importedName) => {
           setImportOpen(false);
           void reload(importedName);
+          window.dispatchEvent(new Event("mh-apps-changed"));
         }}
       />
     </div>
@@ -752,7 +763,7 @@ function AnsibleV2DetailPane({
           <Button
             type="primary"
             icon={<IconLaunch />}
-            onClick={() => setTab("deliver")}
+            onClick={() => go({ name: "new", app: detail.name })}
           >
             {bi("配置并生成交付", "Configure & Deliver")}
           </Button>
@@ -1454,6 +1465,82 @@ function isNodeOnline(n: ExecNodeItem): boolean {
   return !Number.isNaN(ts) && Date.now() - ts < 90_000;
 }
 
+const VAR_GROUP_ORDER = [
+  "basic",
+  "network",
+  "ha",
+  "security",
+  "tuning",
+  "baseline",
+  "advanced",
+];
+
+function evalVarWhen(
+  whenExpr: string | undefined,
+  vars: Record<string, unknown>,
+  hosts: RenderHost[],
+): boolean {
+  const raw = (whenExpr || "").trim();
+  if (!raw) return true;
+  const clauses = raw.split(/\s+(?:&&|and)\s+/i).map((s) => s.trim()).filter(Boolean);
+  for (const clause of clauses) {
+    // group.<name> == 0 | group.<name> > 0
+    const gm = clause.match(/^group\.([a-zA-Z0-9_-]+)\s*(==|!=|>|>=|<|<=)\s*(\d+)$/);
+    if (gm) {
+      const grp = gm[1];
+      const op = gm[2];
+      const target = Number(gm[3]);
+      const count = hosts.filter((h) => h.groups.includes(grp)).length;
+      if (op === "==" && !(count === target)) return false;
+      if (op === "!=" && !(count !== target)) return false;
+      if (op === ">" && !(count > target)) return false;
+      if (op === ">=" && !(count >= target)) return false;
+      if (op === "<" && !(count < target)) return false;
+      if (op === "<=" && !(count <= target)) return false;
+      continue;
+    }
+    // var == 'val' | var != 'val'
+    const sm = clause.match(/^([a-zA-Z][a-zA-Z0-9_]*)\s*(==|!=)\s*['"]([^'"]*)['"]$/);
+    if (sm) {
+      const cur = String(vars[sm[1]] ?? "");
+      if (sm[2] === "==" && cur !== sm[3]) return false;
+      if (sm[2] === "!=" && cur === sm[3]) return false;
+      continue;
+    }
+    // var == true | var == false
+    const bm = clause.match(/^([a-zA-Z][a-zA-Z0-9_]*)\s*(==|!=)\s*(true|false)$/i);
+    if (bm) {
+      const cur = Boolean(vars[bm[1]]);
+      const expected = bm[3].toLowerCase() === "true";
+      if (bm[2] === "==" && cur !== expected) return false;
+      if (bm[2] === "!=" && cur === expected) return false;
+      continue;
+    }
+  }
+  return true;
+}
+
+function isValidCIDR(v: string): boolean {
+  const s = v.trim();
+  if (!s) return true;
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/);
+  if (!m) return false;
+  const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  const mask = Number(m[5]);
+  return octets.every((n) => n >= 0 && n <= 255) && mask >= 0 && mask <= 32;
+}
+
+function randomStrongPassword(len = 16): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%^*";
+  const arr = new Uint32Array(len);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < len; i++) arr[i] = Math.floor(Math.random() * chars.length);
+  }
+  return Array.from(arr, (n) => chars[n % chars.length]).join("");
+}
+
 function DeliverTab({
   detail,
   initialScheme,
@@ -1486,6 +1573,16 @@ function DeliverTab({
   const [vars, setVars] = useState<Record<string, unknown>>(() =>
     buildInitialVars(detail.report.vars || [], startScheme),
   );
+  const [varQuery, setVarQuery] = useState("");
+  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({
+    basic: true,
+    network: true,
+    ha: true,
+    security: true,
+    tuning: true,
+    baseline: false,
+    advanced: false,
+  });
   const [offlineRepoOpen, setOfflineRepoOpen] = useState(false);
   const [offlineAptUrl, setOfflineAptUrl] = useState("");
   const [offlineRpmUrl, setOfflineRpmUrl] = useState("");
@@ -2011,116 +2108,306 @@ function DeliverTab({
             </div>
           </div>
 
-          {/* Native Ansible Variables Form */}
-          <div className="av2-card">
-            <div className="av2-card-head">
-              <h3 className="av2-card-title">
-                {bi("标准 Ansible 变量 (group_vars/all.yml)", "Ansible Variables")}
-              </h3>
-              <span className="av2-card-sub">
-                {(detail.report.vars || []).length} {bi("项", "vars")}
-              </span>
-            </div>
-            {(detail.report.vars || []).length === 0 ? (
-              <div className="av2-card-sub">
-                {bi("该组件无需额外变量，可直接生成标准交付。", "No configurable variables needed.")}
-              </div>
-            ) : (
-              <div className="av2-vars-form">
-                {(detail.report.vars || []).map((v) => {
-                  const val = vars[v.key];
-                  const label = bi(v.label || v.key, v.label_en || v.label || v.key);
-                  const setVal = (nv: unknown) =>
-                    setVars((prev) => ({ ...prev, [v.key]: nv }));
+          {/* Dynamic Ansible-Driven Variables Form (100% auto-parsed from Ansible AST, zero hardcoding) */}
+          {(() => {
+            const allVars = detail.report.vars || [];
+            const activeVars = allVars.filter((v) => evalVarWhen(v.when, vars, hosts));
+            const hiddenByCondition = allVars.length - activeVars.length;
+            const q = varQuery.trim().toLowerCase();
+            const filteredVars = q
+              ? activeVars.filter((v) =>
+                  `${v.key} ${v.label || ""} ${v.description || ""} ${v.group_label || ""}`
+                    .toLowerCase()
+                    .includes(q),
+                )
+              : activeVars;
+            const groupedMap = new Map<
+              string,
+              { id: string; label: string; items: VarSpec[] }
+            >();
+            filteredVars.forEach((v) => {
+              const gid = v.group || "basic";
+              if (!groupedMap.has(gid)) {
+                groupedMap.set(gid, {
+                  id: gid,
+                  label: bi(
+                    v.group_label || gid,
+                    v.group_label_en || v.group_label || gid,
+                  ),
+                  items: [],
+                });
+              }
+              groupedMap.get(gid)!.items.push(v);
+            });
+            const sections = Array.from(groupedMap.values()).sort((a, b) => {
+              const ai = VAR_GROUP_ORDER.indexOf(a.id);
+              const biIdx = VAR_GROUP_ORDER.indexOf(b.id);
+              return (ai === -1 ? 99 : ai) - (biIdx === -1 ? 99 : biIdx);
+            });
 
-                  return (
-                    <div key={v.key} className="av2-field">
-                      <label className="av2-field-label">
-                        <span>{label}</span>
-                        <span className="av2-field-key">{v.key}</span>
-                      </label>
-                      {v.type === "bool" ? (
-                        <div>
-                          <Switch
-                            size="small"
-                            checked={Boolean(val)}
-                            onChange={(c) => setVal(c)}
-                          />
-                        </div>
-                      ) : v.type === "select" && v.choices && v.choices.length > 0 ? (
-                        <Select
-                          size="small"
-                          value={val !== undefined ? String(val) : undefined}
-                          onChange={(nv) => setVal(nv)}
+            const renderField = (v: VarSpec) => {
+              const val = vars[v.key];
+              const label = bi(v.label || v.key, v.label_en || v.label || v.key);
+              const setVal = (nv: unknown) =>
+                setVars((prev) => ({ ...prev, [v.key]: nv }));
+              const cidrBad =
+                v.type === "cidr" &&
+                typeof val === "string" &&
+                val.trim() !== "" &&
+                !isValidCIDR(val);
+
+              return (
+                <div key={v.key} className="av2-field">
+                  <label className="av2-field-label">
+                    <span className="av2-field-meta">
+                      <span>{label}</span>
+                      {v.required && (
+                        <span style={{ color: "var(--bad, #dc2626)" }}>*</span>
+                      )}
+                      {v.when && (
+                        <span
+                          className="av2-when-pill"
+                          title={bi(
+                            `由 Ansible 条件自动联动显现：${v.when}`,
+                            `Dynamically shown by Ansible condition: ${v.when}`,
+                          )}
                         >
-                          {v.choices.map((ch) => (
-                            <Select.Option key={ch} value={ch}>
-                              {ch}
-                            </Select.Option>
-                          ))}
-                        </Select>
-                      ) : v.type === "int" || v.type === "port" ? (
-                        <InputNumber
-                          size="small"
-                          value={
-                            val === undefined || val === null || val === ""
-                              ? undefined
-                              : Number(val)
-                          }
-                          min={v.type === "port" ? 1 : 0}
-                          max={v.type === "port" ? 65535 : undefined}
-                          onChange={(nv) => setVal(nv)}
-                          style={{ width: "100%" }}
-                        />
-                      ) : v.type === "list" ? (
-                        <Input.TextArea
-                          autoSize={{ minRows: 1, maxRows: 4 }}
-                          style={{ fontSize: 12.5, fontFamily: "var(--mono)" }}
-                          placeholder={bi("每行一项（如 10.10.0.11:5432）", "One item per line")}
-                          value={
-                            Array.isArray(val)
-                              ? val.map((x) => String(x)).join("\n")
-                              : val === undefined || val === null
-                                ? ""
-                                : String(val)
-                          }
-                          onChange={(nv) => {
-                            const items = nv
-                              .split(/\r?\n/)
-                              .map((s) => s.trim())
-                              .filter(Boolean);
-                            setVal(items);
-                          }}
-                        />
-                      ) : v.type === "secret" ? (
-                        <Input.Password
-                          size="small"
-                          value={val !== undefined ? String(val) : ""}
-                          placeholder={bi("留空则由 Ansible 自动生成或使用默认", "Leave blank for default")}
-                          onChange={(nv) => setVal(nv)}
-                        />
-                      ) : (
-                        <Input
-                          size="small"
-                          value={
-                            val === undefined || val === null
-                              ? ""
-                              : typeof val === "object"
-                                ? JSON.stringify(val)
-                                : String(val)
-                          }
-                          onChange={(nv) => setVal(nv)}
-                        />
+                          {bi("联动", "if")}: {v.when}
+                        </span>
                       )}
-                      {v.description && (
-                        <span className="av2-field-hint">{v.description}</span>
-                      )}
+                    </span>
+                    <span className="av2-field-key" title={`source: ${v.source || "ansible"}`}>
+                      {v.key}
+                    </span>
+                  </label>
+                  {v.type === "bool" ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Switch
+                        size="small"
+                        checked={Boolean(val)}
+                        onChange={(c) => {
+                          setVal(c);
+                          if (c && v.group === "baseline") {
+                            setSectionOpen((prev) => ({ ...prev, baseline: true }));
+                          }
+                        }}
+                      />
+                      <span className="av2-card-sub">
+                        {Boolean(val) ? bi("已启用", "Enabled") : bi("未启用", "Disabled")}
+                      </span>
                     </div>
-                  );
-                })}
+                  ) : v.type === "select" && v.choices && v.choices.length > 0 ? (
+                    <Select
+                      size="small"
+                      value={val !== undefined ? String(val) : undefined}
+                      onChange={(nv) => setVal(nv)}
+                    >
+                      {v.choices.map((ch) => (
+                        <Select.Option key={ch} value={ch}>
+                          {ch}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  ) : v.type === "int" || v.type === "port" ? (
+                    <InputNumber
+                      size="small"
+                      value={
+                        val === undefined || val === null || val === ""
+                          ? undefined
+                          : Number(val)
+                      }
+                      min={v.min !== undefined ? v.min : v.type === "port" ? 1 : 0}
+                      max={v.max !== undefined ? v.max : v.type === "port" ? 65535 : undefined}
+                      suffix={v.unit || (v.type === "port" ? "TCP/UDP" : undefined)}
+                      onChange={(nv) => setVal(nv)}
+                      style={{ width: "100%" }}
+                    />
+                  ) : v.type === "list" ? (
+                    <Input.TextArea
+                      autoSize={{ minRows: 1, maxRows: 4 }}
+                      style={{ fontSize: 12.5, fontFamily: "var(--mono)" }}
+                      placeholder={bi("每行一项（自动渲染为 YAML 数组）", "One item per line (YAML list)")}
+                      value={
+                        Array.isArray(val)
+                          ? val.map((x) => String(x)).join("\n")
+                          : val === undefined || val === null
+                            ? ""
+                            : String(val)
+                      }
+                      onChange={(nv) => {
+                        const items = nv
+                          .split(/\r?\n/)
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        setVal(items);
+                      }}
+                    />
+                  ) : v.type === "dict" ? (
+                    <Input.TextArea
+                      autoSize={{ minRows: 2, maxRows: 6 }}
+                      style={{ fontSize: 12, fontFamily: "var(--mono)" }}
+                      placeholder='{"key": "value"}'
+                      value={
+                        val === undefined || val === null
+                          ? ""
+                          : typeof val === "string"
+                            ? val
+                            : JSON.stringify(val, null, 2)
+                      }
+                      onChange={(nv) => {
+                        try {
+                          setVal(JSON.parse(nv));
+                        } catch {
+                          setVal(nv);
+                        }
+                      }}
+                    />
+                  ) : v.type === "secret" ? (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <Input.Password
+                        size="small"
+                        value={val !== undefined ? String(val) : ""}
+                        placeholder={bi("留空则使用默认或自动生成", "Leave blank for default")}
+                        onChange={(nv) => setVal(nv)}
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        size="small"
+                        type="secondary"
+                        style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                        onClick={() => setVal(randomStrongPassword())}
+                      >
+                        {bi("随机生成", "Generate")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Input
+                      size="small"
+                      status={cidrBad ? "error" : undefined}
+                      style={
+                        v.type === "path" || v.type === "cidr"
+                          ? { fontFamily: "var(--mono)" }
+                          : undefined
+                      }
+                      placeholder={
+                        v.type === "cidr"
+                          ? "10.0.0.0/24"
+                          : v.type === "path"
+                            ? "/var/lib/..."
+                            : undefined
+                      }
+                      value={
+                        val === undefined || val === null
+                          ? ""
+                          : typeof val === "object"
+                            ? JSON.stringify(val)
+                            : String(val)
+                      }
+                      onChange={(nv) => setVal(nv)}
+                    />
+                  )}
+                  {cidrBad && (
+                    <span className="av2-field-err">
+                      {bi("请输入合法的 IPv4 CIDR 网段，例如 10.0.0.0/24", "Enter a valid IPv4 CIDR, e.g. 10.0.0.0/24")}
+                    </span>
+                  )}
+                  {v.description && (
+                    <span className="av2-field-hint">{v.description}</span>
+                  )}
+                </div>
+              );
+            };
+
+            return (
+              <div className="av2-card">
+                <div className="av2-card-head" style={{ flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <h3 className="av2-card-title">
+                      {bi("标准 Ansible 变量 (group_vars/all.yml)", "Ansible Variables (Auto-Detected)")}
+                    </h3>
+                    <span className="av2-card-sub">
+                      {bi(
+                        "全部表单项由解析 Ansible argument_specs / defaults / when / 模板条件自动生成",
+                        "Form fields, sections & visibility are inferred directly from Ansible source",
+                      )}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {hiddenByCondition > 0 && (
+                      <span className="av2-dyn-badge">
+                        {bi(
+                          `按条件显示 ${activeVars.length}/${allVars.length}`,
+                          `Active ${activeVars.length}/${allVars.length}`,
+                        )}
+                      </span>
+                    )}
+                    {hiddenByCondition === 0 && (
+                      <span className="av2-card-sub">
+                        {allVars.length} {bi("项", "vars")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {allVars.length > 8 && (
+                  <Input
+                    size="small"
+                    allowClear
+                    prefix={<IconSearch />}
+                    placeholder={bi("筛选变量名或说明…", "Filter variables by name or description…")}
+                    value={varQuery}
+                    onChange={setVarQuery}
+                  />
+                )}
+
+                {allVars.length === 0 ? (
+                  <div className="av2-card-sub">
+                    {bi("该组件无需额外变量，可直接生成标准交付。", "No configurable variables needed.")}
+                  </div>
+                ) : sections.length <= 1 ? (
+                  <div className="av2-vars-form">
+                    {filteredVars.map(renderField)}
+                  </div>
+                ) : (
+                  <div className="av2-var-sections">
+                    {sections.map((sec) => {
+                      const isOpen =
+                        q !== "" ||
+                        sectionOpen[sec.id] !== false;
+                      return (
+                        <div key={sec.id} className="av2-var-section">
+                          <button
+                            type="button"
+                            className="av2-var-section-head"
+                            aria-expanded={isOpen}
+                            onClick={() =>
+                              setSectionOpen((prev) => ({
+                                ...prev,
+                                [sec.id]: !isOpen,
+                              }))
+                            }
+                          >
+                            <span>
+                              {sec.label}{" "}
+                              <span className="av2-card-sub">({sec.items.length})</span>
+                            </span>
+                            <span className="av2-card-sub">
+                              {isOpen ? bi("收起", "Hide") : bi("展开", "Show")}
+                            </span>
+                          </button>
+                          {isOpen && (
+                            <div className="av2-var-section-body">
+                              {sec.items.map(renderField)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* Air-Gapped / Internal Offline Software Mirror Config */}
           <div className="av2-card">

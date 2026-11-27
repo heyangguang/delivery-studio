@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"delivery-studio/internal/ansiblev2"
 	"delivery-studio/mwpack"
 )
 
@@ -241,6 +242,66 @@ func (s *storeServer) importPresetsHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Include all Ansible 2.0 native components (built-ins + custom imported Role/Playbook assets)
+	for _, v2Name := range s.allV2ComponentNames() {
+		if v2Name == "external-lb-native" || inCat[v2Name] {
+			continue
+		}
+		files, src, ok := s.loadV2Component(v2Name)
+		if !ok {
+			continue
+		}
+		rep := ansiblev2.Inspect(files, v2Name, src)
+		m := rep.Manifest
+		inCat[v2Name] = true
+		roles := make([]mwpack.ImportRolePreset, 0, len(m.Groups))
+		for _, g := range m.Groups {
+			roles = append(roles, mwpack.ImportRolePreset{
+				ID:      g.Name,
+				Title:   firstNonEmptyStr(g.Title, g.Name),
+				TitleEn: firstNonEmptyStr(g.TitleEn, g.Title, g.Name),
+			})
+		}
+		if len(roles) == 0 {
+			roles = []mwpack.ImportRolePreset{{ID: "node", Title: "节点", TitleEn: "Node"}}
+		}
+		defPort := 0
+		for _, pt := range m.Ports {
+			if pt.Port > 0 {
+				defPort = pt.Port
+				break
+			}
+		}
+		baseID := strings.TrimSuffix(v2Name, "-native")
+		item := importPresetItem{
+			ID:              v2Name,
+			Name:            firstNonEmptyStr(m.Title, v2Name),
+			NameEn:          firstNonEmptyStr(m.TitleEn, m.Title, v2Name),
+			Category:        firstNonEmptyStr(m.Category, "middleware"),
+			CategoryTitle:   tr(lang, "Ansible 2.0 组件", "Ansible 2.0 Component"),
+			CategoryTitleEn: "Ansible 2.0 Component",
+			Icon:            firstNonEmptyStr(m.Icon, "server"),
+			Color:           firstNonEmptyStr(m.Color, "blue"),
+			Summary:         m.Summary,
+			SummaryEn:       firstNonEmptyStr(m.SummaryEn, m.Summary),
+			InCatalog:       true,
+			DefaultPort:     defPort,
+			Versions:        []string{firstNonEmptyStr(m.Version, "1.0.0")},
+			Roles:           roles,
+		}
+		if pr, okP := mwpack.LookupImportPreset(baseID); okP {
+			item.Category = pr.Category
+			if item.DefaultPort == 0 {
+				item.DefaultPort = pr.DefaultPort
+			}
+			item.ServiceHints = pr.ServiceHints
+			item.ConfigHints = pr.ConfigHints
+			item.DataHints = pr.DataHints
+			item.LogHints = pr.LogHints
+		}
+		catalogItems = append(catalogItems, item)
+	}
+
 	var presetItems []importPresetItem
 	for _, pr := range mwpack.ImportPresets {
 		if inCat[pr.ID] {
@@ -389,7 +450,7 @@ var (
 )
 
 func analyzeImportedBaselineHealth(compID, displayName string, req importClusterReq, lang string) baselineHealth {
-	cid := mwpack.NormalizeImportComponentID(firstNonEmptyStr(compID, req.Component, displayName))
+	cid := strings.TrimSuffix(mwpack.NormalizeImportComponentID(firstNonEmptyStr(compID, req.Component, displayName)), "-native")
 	dname := firstNonEmptyStr(strings.TrimSpace(displayName), req.DisplayName, cid)
 	notesLower := strings.ToLower(req.Notes)
 	hasCompanion := func(target string) bool {
@@ -761,7 +822,7 @@ func buildGapReadOnlyProbeScript(req importProbeScriptReq, existing *importClust
 	}
 
 	sb.WriteString("\necho '=== MW_IMPORT_MIDDLEWARE ==='\n")
-	switch compID {
+	switch strings.TrimSuffix(compID, "-native") {
 	case "postgresql":
 		if want["paths"] {
 			sb.WriteString("# Locate PostgreSQL data dir, config file, log dir & Patroni YAML (read-only)\n")
@@ -2283,10 +2344,11 @@ func parseImportedDeterministic(text, component, displayName string, preset mwpa
 		if strings.Contains(low, "docker") && strings.Contains(ln, "Up ") && draft.DeployMethod == "" {
 			draft.DeployMethod = "docker"
 		}
-		// Extract version from typical middleware --version banners (skip companion-only banners if primary != companion)
-		if draft.ExactVersion == "" {
+		// Extract version from typical middleware --version banners (skip OS release lines & companion-only banners if primary != companion)
+		if draft.ExactVersion == "" && section != "OS" && !strings.HasPrefix(low, "version=") && !strings.HasPrefix(low, "version_id=") && !strings.HasPrefix(low, "version_codename=") {
+			baseComp := strings.TrimSuffix(strings.ToLower(draft.Component), "-native")
 			isCompanionBanner := isExporterBanner || strings.HasPrefix(low, "etcd version:") || strings.HasPrefix(low, "patronictl version") || strings.HasPrefix(low, "pgbackrest ")
-			if !isCompanionBanner || strings.EqualFold(draft.Component, "etcd") || strings.EqualFold(draft.Component, "patroni") {
+			if !isCompanionBanner || baseComp == "etcd" || baseComp == "patroni" {
 				if strings.Contains(low, "version") || strings.Contains(low, "ver ") || strings.Contains(low, "(postgresql)") || strings.Contains(low, "redis server v=") || strings.Contains(low, "nginx/") || strings.Contains(low, "haproxy") || strings.Contains(low, "mysqld") || strings.Contains(low, "mongod") || strings.Contains(low, "clickhouse") {
 					if m := reVersionSemver.FindStringSubmatch(ln); len(m) == 2 {
 						draft.ExactVersion = m[1]
@@ -3102,7 +3164,7 @@ func majorMinorVersion(exact, comp string) string {
 		return ""
 	}
 	parts := strings.Split(exact, ".")
-	c := strings.ToLower(comp)
+	c := strings.TrimSuffix(strings.ToLower(comp), "-native")
 	if c == "postgresql" || c == "patroni" {
 		return parts[0]
 	}
@@ -3415,14 +3477,15 @@ func buildImportedDeployment(cat *mwpack.Catalog, req importClusterReq, user, no
 	// Wire cross-instance Uses (e.g. Patroni -> etcd DCS + PostgreSQL database; LB -> backend)
 	dcsID := firstNonEmptyStr(compInstID["etcd"], compInstID["consul"], compInstID["zookeeper"])
 	lbID := firstNonEmptyStr(compInstID["haproxy"], compInstID["nginx"], compInstID["pgbouncer"], compInstID["proxysql"])
+	baseCompID := strings.TrimSuffix(compID, "-native")
 	for i := range instances {
 		sp := &instances[i]
-		switch sp.Component {
+		switch strings.TrimSuffix(sp.Component, "-native") {
 		case "patroni":
 			if sp.Uses == nil {
 				sp.Uses = map[string]string{}
 			}
-			if compID == "postgresql" {
+			if baseCompID == "postgresql" {
 				sp.Uses["postgresql-database"] = instID
 			}
 			if dcsID != "" {

@@ -66,6 +66,45 @@
   tags:
     - configure
 
+- name: 写入 PostgreSQL 操作系统内核基线与进程句柄上限
+  when: postgresql_apply_baseline | bool
+  tags:
+    - baseline
+    - configure
+  block:
+    - name: 写入 /etc/sysctl.d/99-studio-postgresql.conf 内核参数
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-studio-postgresql.conf
+        mode: "0644"
+        content: |
+          vm.swappiness = {{ postgresql_vm_swappiness }}
+          net.core.somaxconn = {{ postgresql_somaxconn }}
+      register: pg_sysctl_written
+
+    - name: 立即应用 sysctl 内核参数
+      ansible.builtin.command: sysctl --system
+      when: pg_sysctl_written.changed
+      changed_when: true
+
+    - name: 创建 postgresql systemd override 目录
+      ansible.builtin.file:
+        path: /etc/systemd/system/postgresql@.service.d
+        state: directory
+        mode: "0755"
+
+    - name: 配置 postgresql LimitNOFILE 文件描述符上限
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/postgresql@.service.d/99-studio-limits.conf
+        mode: "0644"
+        content: |
+          [Service]
+          LimitNOFILE={{ postgresql_nofile }}
+      notify: restart postgresql
+
+    - name: 重载 systemd 使 LimitNOFILE 生效
+      ansible.builtin.systemd:
+        daemon_reload: true
+
 - name: 配置客户端接入与流复制 pg_hba.conf 规则
   ansible.builtin.blockinfile:
     path: "{{ pg_conf_dir }}/pg_hba.conf"
@@ -73,6 +112,9 @@
     block: |
       host    all             all             {{ postgresql_client_cidr }}      scram-sha-256
       host    replication     {{ postgresql_replication_user }}  {{ postgresql_client_cidr }}      scram-sha-256
+      {% for extra_cidr in (postgresql_extra_client_cidrs | default([])) %}
+      host    all             all             {{ extra_cidr }}      scram-sha-256
+      {% endfor %}
   notify: restart postgresql
   tags:
     - configure

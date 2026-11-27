@@ -5,12 +5,10 @@ description: 工程师执行交付手册遇到问题时怎么排查：从这一�
 ---
 # 交付执行排障
 
-## 平台离线命令入口（必须遵守）
-- 本平台交付只提供 bin/ansible-playbook 和 bin/ansible-inventory，没有 bin/ansible；也不能假设系统 PATH 中有 ansible。
-- 先读取当前交付手册或 controllerFacts，确认项目目录、控制节点、inventory 和实际 playbook 路径。执行时使用 cd 到项目目录后的 ../../bin/ansible-playbook 或已核实的绝对路径；查看清单用 ../../bin/ansible-inventory -i inventory/hosts.yml --graph。
-- 不得生成裸 ansible 或 /root/middleware-automation/bin/ansible 命令。ansible-playbook 不能接收 ad-hoc 的 -m/-a 参数，不能机械替换命令名。
-- 单机排查：明确告诉用户在哪台目标机器上执行，并提供该机直接执行的只读 shell 命令。需要跨机器检查时优先使用已存在且已核实的 playbook；确需临时 playbook 则必须给出完整 YAML、保存位置和调用命令，不要虚构已存在的文件。
-- 旧对话、知识库或用户截图中出现 bin/ansible 不代表该入口存在；应纠正旧命令，不要沿用。
+## 平台命令入口（2.0 原生优先，兼容 v1 离线包）
+- **Ansible 2.0 原生交付（现行标准）**：解压目录为标准 Ansible 工程，使用 `ansible-playbook -i inventory/hosts.yml playbooks/<name>.yml`（可配合 `--check --diff`、`--tags`、`--limit`）与 `ansible-inventory -i inventory/hosts.yml --graph`。
+- **v1 兼容离线包**：仅在交付手册明确使用内置打包运行时路径时使用 `../../bin/ansible-playbook` 与 `../../bin/ansible-inventory`（没有 bin/ansible）。
+- 单机排查明确指明目标主机并给出只读 shell 命令；跨机排查优先使用已核实的 `playbooks/probe.yml` / `playbooks/verify.yml`，严禁虚构不存在的文件或 ad-hoc `ansible -m` 命令。
 
 目标是用最少的步骤找到**真正的根因**，再给出能落地的办法。不要为了显得勤奋而多看文件。
 

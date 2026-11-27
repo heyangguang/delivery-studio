@@ -57,14 +57,16 @@
   tags:
     - configure
 
-- name: 写入 systemd override 启用 --config-file
+- name: 写入 systemd override 启用 --config-file 与文件描述符上限
   ansible.builtin.copy:
     dest: /etc/systemd/system/etcd.service.d/override.conf
     mode: "0644"
     content: |
       [Service]
+      LimitNOFILE={{ etcd_nofile }}
       ExecStart=
       ExecStart=/usr/bin/etcd --config-file /etc/etcd/etcd.conf.yml
+  register: etcd_unit_rendered
   tags:
     - configure
 
@@ -76,8 +78,8 @@
   tags:
     - start
 
-- name: 并发启动 etcd 集群节点完成 Raft 选主
-  ansible.builtin.command: systemctl start --no-block etcd
+- name: 并发启动或重启 etcd 集群节点完成 Raft 选主
+  ansible.builtin.command: "systemctl {{ 'restart' if (etcd_unit_rendered.changed) else 'start' }} --no-block etcd"
   changed_when: true
   tags:
     - start

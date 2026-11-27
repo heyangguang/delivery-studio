@@ -4,8 +4,17 @@ daemonize no
 supervised auto
 protected-mode yes
 dir {{ redis_data_dir }}
+databases {{ redis_databases }}
+tcp-backlog {{ redis_tcp_backlog }}
+tcp-keepalive {{ redis_tcp_keepalive }}
+timeout {{ redis_client_timeout }}
+loglevel {{ redis_loglevel }}
 maxmemory {{ redis_maxmemory }}
 maxmemory-policy {{ redis_maxmemory_policy }}
+maxmemory-samples {{ redis_maxmemory_samples }}
+repl-diskless-sync {{ redis_repl_diskless_sync }}
+repl-backlog-size {{ redis_repl_backlog_size }}
+replica-priority {{ redis_replica_priority }}
 {% if redis_persistence_mode == 'none' %}
 save ""
 appendonly no
@@ -13,6 +22,11 @@ appendonly no
 save 900 1
 save 300 10
 appendonly no
+{% elif redis_persistence_mode == 'mixed' %}
+save 900 1
+save 300 10
+appendonly yes
+aof-use-rdb-preamble yes
 {% else %}
 save ""
 appendonly yes

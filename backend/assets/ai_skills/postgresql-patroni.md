@@ -5,8 +5,12 @@ description: Patroni 集群状态判读、主从复制、故障切换、pg_rewin
 ---
 # PostgreSQL 与 Patroni
 
-## 先识别方案
-先读当前 scheme、deployment_mode、角色及生成配置。single 是单机，replication 是原生复制人工切换，patroni 才有 Patroni/etcd，legacy 按历史证据判断。不能在单机要求 patronictl，不用节点数推断高可用；新交付已移除 external-etcd。
+## 先识别方案（兼容 Ansible 2.0 与 v1 历史交付）
+- **Ansible 2.0 原生组件**：
+  - `postgresql-native`：单机（`single`）或一主一从/一主二从物理流复制（`primary-replica` / `primary-2replicas`，人工切换，无 etcd）。
+  - `patroni-native`：三节点同机融合高可用（`ha-3-colocated`）、双节点 Patroni + 外部独立 etcd（`ha-2-external-etcd`，`etcd` 组为空时填写 `patroni_external_etcd_hosts`）、或三节点强一致同步高可用（`ha-3-sync`，`patroni_synchronous_mode: true`）。
+  - 注意：Ubuntu 24.04 下 `etcd 3.4` 通过 YAML `--config-file` 启动时必须包含 `enable-grpc-gateway: true`，否则 Patroni `etcd3:` 访问 `/v3` 会报 404。
+- **v1 历史交付**：读当前 `scheme`、`deployment_mode`、角色及生成配置；`single` 是单机、`replication` 是原生复制、`patroni` 才有 Patroni/etcd。不能在单机要求 `patronictl`，不用节点数推断高可用。
 
 ## 核对实际状态
 从生成 unit/任务确认可执行文件、服务名、配置路径、端口和数据目录。Patroni 模式才用已核实配置路径的 patronictl list；REST 端口读交付定义，不固定为 8008。SQL 注明主库或从库，使用实际 psql 路径和账号，不嵌入口令。

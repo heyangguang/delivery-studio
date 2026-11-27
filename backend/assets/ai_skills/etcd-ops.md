@@ -5,8 +5,8 @@ description: etcd 健康检查、成员管理、空间配额告警（NOSPACE）�
 ---
 # etcd 运维
 
-## 交付事实优先
-先核对版本、端点、成员、工具路径和认证。内置 etcd 当前未启用自身 TLS，不能把 PG TLS 当 etcd TLS；现场已有证书时也不能忽略。平台新交付不再提供 external-etcd。
+## 交付事实优先（兼容 Ansible 2.0 与 v1）
+先核对版本、端点、成员、工具路径、配置文件（如 `/etc/etcd/etcd.conf.yml`）与 systemd `LimitNOFILE`。内置 2.0 `etcd-native` 支持独立 3 节点 Raft 集群（可由 `patroni-native` 的 `ha-2-external-etcd` 方案接入）及 `etcd_heartbeat_interval` / `etcd_election_timeout` / `etcd_log_level` / `etcd_nofile` 等参数调优；Ubuntu 24.04 的 etcd 3.4 YAML 配置必须保留 `enable-grpc-gateway: true` 以开启 `/v3` HTTP gRPC-Gateway 接口。内置默认未启用自身 TLS，不能把 PG TLS 当 etcd TLS；现场已有证书时也不能忽略。
 
 ## 健康
 在明确节点使用已核实路径的 etcdctl。每条命令都带实际 --endpoints 或明确设置的 ETCDCTL_ENDPOINTS，不能默认为 localhost；检查 endpoint health、endpoint status -w table、member list -w table、alarm list。不原样输出省略号或占位符。

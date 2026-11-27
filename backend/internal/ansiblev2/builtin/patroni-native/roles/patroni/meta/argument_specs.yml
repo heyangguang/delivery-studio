@@ -30,7 +30,11 @@ argument_specs:
       patroni_client_cidr:
         type: str
         default: 0.0.0.0/0
-        description: pg_hba.conf 允许接入的客户端与节点网段（CIDR）
+        description: pg_hba.conf 允许接入的客户端与节点主网段（CIDR）
+      patroni_extra_client_cidrs:
+        type: list
+        default: []
+        description: 额外放通的客户端网段列表（每行一个 CIDR）
       patroni_superuser_password:
         type: str
         default: PatroniAdmin2026!
@@ -45,18 +49,23 @@ argument_specs:
         default: PatroniRepl2026!
         no_log: true
         description: WAL 流复制账号密码
-      patroni_shared_buffers:
-        type: str
-        default: 512MB
-        description: PostgreSQL 共享内存缓冲区大小（shared_buffers）
-      patroni_max_connections:
-        type: int
-        default: 300
-        description: PostgreSQL 最大并发连接数（max_connections）
       patroni_synchronous_mode:
         type: bool
         default: false
-        description: 启用强一致同步提交（synchronous_mode，确保至少 1 个从库确认写入）
+        description: 启用强一致同步提交（synchronous_mode，确保从库确认写入后再返回提交成功）
+      patroni_synchronous_mode_strict:
+        type: bool
+        default: false
+        description: 严格同步模式（从库不足时主库拒写以保证零数据丢失）
+      patroni_synchronous_node_count:
+        type: int
+        default: 1
+        description: 同步提交需确认的从库数量（synchronous_node_count）
+      patroni_synchronous_commit:
+        type: str
+        default: "on"
+        choices: ["on", "remote_apply", "remote_write", "local"]
+        description: PostgreSQL 同步提交级别（synchronous_commit）
       patroni_ttl:
         type: int
         default: 30
@@ -69,3 +78,75 @@ argument_specs:
         type: int
         default: 10
         description: DCS 连接重试超时（秒）
+      patroni_maximum_lag_on_failover:
+        type: int
+        default: 1048576
+        description: 自动故障切换允许的从库最大 WAL 落后字节数（默认 1MB）
+      patroni_max_connections:
+        type: int
+        default: 300
+        description: PostgreSQL 最大并发连接数（max_connections）
+      patroni_shared_buffers:
+        type: str
+        default: 512MB
+        description: PostgreSQL 共享内存缓冲区大小（shared_buffers）
+      patroni_effective_cache_size:
+        type: str
+        default: 1536MB
+        description: 查询规划器估算可用操作系统缓存（effective_cache_size）
+      patroni_maintenance_work_mem:
+        type: str
+        default: 128MB
+        description: 维护操作内存上限（maintenance_work_mem）
+      patroni_work_mem:
+        type: str
+        default: 16MB
+        description: 单次排序与哈希操作内存上限（work_mem）
+      patroni_wal_keep_size:
+        type: str
+        default: 256MB
+        description: 为流复制保留的最小 WAL 大小（wal_keep_size）
+      patroni_max_wal_size:
+        type: str
+        default: 2GB
+        description: 触发 Checkpoint 的最大 WAL 容量（max_wal_size）
+      patroni_checkpoint_completion_target:
+        type: str
+        default: "0.9"
+        description: Checkpoint 平滑落盘占比（推荐 0.9）
+      patroni_max_wal_senders:
+        type: int
+        default: 10
+        description: 最大 WAL 发送并发进程数（max_wal_senders）
+      patroni_max_replication_slots:
+        type: int
+        default: 10
+        description: 最大复制槽数量（max_replication_slots）
+      patroni_hot_standby_feedback:
+        type: bool
+        default: true
+        description: 开启热备查询反馈减少只读查询冲突
+      patroni_log_min_duration_statement:
+        type: int
+        default: 1000
+        description: 慢 SQL 日志记录阈值（毫秒）
+      patroni_timezone:
+        type: str
+        default: Asia/Shanghai
+        description: 数据库默认时区
+      patroni_apply_baseline:
+        type: bool
+        default: false
+        description: 是否自动写入操作系统内核基线与进程句柄上限（sysctl + LimitNOFILE）
+      patroni_vm_swappiness:
+        type: int
+        default: 10
+        description: 内核 vm.swappiness（数据库建议 1-10）
+      patroni_somaxconn:
+        type: int
+        default: 4096
+        description: 内核 net.core.somaxconn 连接队列上限
+      patroni_nofile:
+        type: int
+        default: 65535
+        description: Patroni/PostgreSQL 最大文件描述符（systemd LimitNOFILE）

@@ -823,6 +823,7 @@ func NormalizeImportComponentID(raw string) string {
 // LookupImportPreset returns a built-in middleware preset by ID or alias.
 func LookupImportPreset(id string) (ImportPreset, bool) {
 	key := strings.ToLower(strings.TrimSpace(id))
+	key = strings.TrimSuffix(key, "-native")
 	aliases := map[string]string{
 		"pg": "postgresql", "postgres": "postgresql",
 		"es": "elasticsearch", "elastic": "elasticsearch",

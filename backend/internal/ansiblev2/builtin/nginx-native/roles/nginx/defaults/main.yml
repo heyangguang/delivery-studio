@@ -6,6 +6,9 @@ nginx_worker_connections: 4096
 nginx_proxy_mode: "http"
 nginx_upstream_servers:
   - "127.0.0.1:5432"
+nginx_upstream_max_fails: 3
+nginx_upstream_fail_timeout: "15s"
 nginx_proxy_connect_timeout: "5s"
 nginx_proxy_read_timeout: "60s"
+nginx_proxy_timeout: "300s"
 nginx_enable_access_log: true

@@ -8,6 +8,45 @@
   tags:
     - install
 
+- name: 写入 Redis 操作系统内核基线与进程句柄上限
+  when: redis_apply_baseline | bool
+  tags:
+    - baseline
+    - configure
+  block:
+    - name: 写入 /etc/sysctl.d/99-studio-redis.conf 内核参数
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-studio-redis.conf
+        mode: "0644"
+        content: |
+          vm.overcommit_memory = {{ redis_vm_overcommit_memory }}
+          net.core.somaxconn = {{ redis_somaxconn }}
+      register: redis_sysctl_written
+
+    - name: 立即应用 sysctl 内核参数
+      ansible.builtin.command: sysctl --system
+      when: redis_sysctl_written.changed
+      changed_when: true
+
+    - name: 创建 redis-server systemd override 目录
+      ansible.builtin.file:
+        path: /etc/systemd/system/redis-server.service.d
+        state: directory
+        mode: "0755"
+
+    - name: 配置 redis-server LimitNOFILE 文件描述符上限
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/redis-server.service.d/99-studio-limits.conf
+        mode: "0644"
+        content: |
+          [Service]
+          LimitNOFILE={{ redis_nofile }}
+      notify: restart redis
+
+    - name: 重载 systemd 使 LimitNOFILE 生效
+      ansible.builtin.systemd:
+        daemon_reload: true
+
 - name: 确保数据目录存在
   ansible.builtin.file:
     path: "{{ redis_data_dir }}"

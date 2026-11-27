@@ -7,6 +7,9 @@ Wants=network-online.target
 Type=simple
 User=postgres
 Group=postgres
+{% if patroni_apply_baseline %}
+LimitNOFILE={{ patroni_nofile }}
+{% endif %}
 ExecStart=/usr/bin/patroni /etc/patroni/patroni.yml
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=process

@@ -26,12 +26,12 @@
 
     - name: 校验外部负载均衡前端入口端口 TCP 可达
       ansible.builtin.wait_for:
-        host: "{{ elb_resolve_ip if (elb_mode == 'domain' and (elb_resolve_ip | default('') | trim | length) > 0) else elb_address }}"
+        host: "{{ elb_address }}"
         port: "{{ elb_frontend_port | int }}"
         timeout: 10
       when: elb_verify_frontend | bool
 
-    - name: 校验外部负载均衡七层 HTTP 路径响应（HTTP 模式）
+    - name: 校验外部负载均衡七层 HTTP 路径响应（HTTP 探活模式）
       ansible.builtin.uri:
         url: "http://{{ elb_address }}:{{ elb_frontend_port }}{{ elb_health_check_path | default('/') }}"
         status_code: [200, 204, 301, 302]
@@ -39,3 +39,4 @@
       when:
         - elb_verify_frontend | bool
         - elb_protocol == 'http'
+        - elb_health_check_type == 'http'

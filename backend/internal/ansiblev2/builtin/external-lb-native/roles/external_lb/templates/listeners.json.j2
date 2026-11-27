@@ -4,14 +4,17 @@
   "mode": {{ elb_mode | to_json }},
   "frontend": {
     "address": {{ elb_address | to_json }},
+{% if elb_mode == 'domain' %}
     "resolve_ip": {{ elb_resolve_ip | to_json }},
+{% endif %}
     "protocol": {{ elb_protocol | to_json }},
     "port": {{ elb_frontend_port | int }}
   },
   "health_check": {
     "type": {{ elb_health_check_type | to_json }},
-    "port": {{ elb_health_check_port | int }},
-    "path": {{ elb_health_check_path | to_json }}
+    "port": {{ elb_health_check_port | int }}{% if elb_health_check_type == 'http' %},
+    "path": {{ elb_health_check_path | to_json }}{% endif %}
+
   },
   "backends": [
 {% for h in groups['backends'] | default([]) %}

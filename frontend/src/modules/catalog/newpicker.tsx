@@ -385,13 +385,11 @@ export function NewDeliveryPicker({
                     role="listitem"
                     tabIndex={0}
                     className="np-card ready"
-                    onClick={() =>
-                      go({ name: "components", v2: c.name, tab: "deliver" })
-                    }
+                    onClick={() => go({ name: "new", app: c.name })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        go({ name: "components", v2: c.name, tab: "deliver" });
+                        go({ name: "new", app: c.name });
                       }
                     }}
                   >
@@ -456,10 +454,9 @@ export function NewDeliveryPicker({
                               title={sc.summary || sc.title}
                               onClick={() =>
                                 go({
-                                  name: "components",
-                                  v2: c.name,
-                                  tab: "deliver",
-                                  scheme: sc.id,
+                                  name: "new",
+                                  app: c.name,
+                                  plan: sc.id,
                                 })
                               }
                             >

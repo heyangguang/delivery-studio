@@ -27,3 +27,28 @@ argument_specs:
         type: str
         default: "1"
         description: 自动压缩保留周期（小时）
+      etcd_heartbeat_interval:
+        type: int
+        default: 100
+        description: Raft Leader 心跳发送间隔（毫秒）
+      etcd_election_timeout:
+        type: int
+        default: 1000
+        description: Raft 选举超时阈值（毫秒，建议为心跳间隔的 10 倍）
+      etcd_max_snapshots:
+        type: int
+        default: 5
+        description: 保留的最大快照文件数（0 为不限制）
+      etcd_max_wals:
+        type: int
+        default: 5
+        description: 保留的最大 WAL 日志文件数（0 为不限制）
+      etcd_log_level:
+        type: str
+        default: "info"
+        choices: ["debug", "info", "warn", "error"]
+        description: etcd 日志级别
+      etcd_nofile:
+        type: int
+        default: 65535
+        description: etcd 进程最大文件描述符限制（systemd LimitNOFILE）

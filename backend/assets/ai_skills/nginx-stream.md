@@ -5,8 +5,8 @@ description: Nginx Stream TCP/UDP 负载均衡配置核对、上游健康探测�
 ---
 # Nginx Stream 四层负载均衡
 
-## 先核对交付事实
-先用 `delivery_info` 与 `search_files` 确认当前交付中 Nginx（stream）监听的入口端口、绑定后端（`binds` / `upstream`）、是否搭配 `keepalived` 提供 VIP、配置路径（如 `/etc/nginx/nginx.conf` 与 `stream.d/`）以及日志路径，不要照搬 HTTP 7 层指令（`http {}` 下的指令在 `stream {}` 中大多不合法）。
+## 先核对交付事实（兼容 Ansible 2.0 `nginx-native` 与 v1）
+先用 `delivery_info` 与 `search_files` 确认当前交付中 Nginx 的代理模式（`nginx_proxy_mode`: `http` 七层或 `stream` 四层，其中 `nginx_proxy_timeout` 仅在 `stream` 模式下联动生效）、监听端口（`nginx_listen_port`）、上游熔断参数（`nginx_upstream_max_fails`、`nginx_upstream_fail_timeout`）、连接数（`nginx_worker_connections`）、配置路径（`/etc/nginx/nginx.conf`）以及是否搭配 `keepalived-native` 提供 VIP；不要把 HTTP 7 层指令照搬到 `stream {}` 中。
 
 ## 配置校验与平滑重载
 - 改动或核对配置前，先执行只读语法校验：`nginx -t`（或查看完整展开配置 `nginx -T`）。

@@ -6,7 +6,7 @@ description: Redis 单机与主从+哨兵（Sentinel）架构核对、复制与�
 # Redis 与哨兵高可用
 
 ## 先核对方案与交付事实
-先用 `delivery_info` 和 `search_files` 确认当前交付是单机还是主从+哨兵 HA（`master_name`、`redis_port`、`sentinel_port`、`sentinel_quorum`、`persistence`、`maxmemory`、`data_dir`），不要凭节点数量假设有哨兵，也不要在单机方案上给出 `SENTINEL` 命令。
+先用 `delivery_info` 和 `search_files` 确认当前交付是 2.0 原生 `redis-native` 还是 v1 历史交付，以及是单机（`single`）还是主从+哨兵 HA（`sentinel-ha`）；核对实际变量（`redis_port`、`redis_sentinel_port`、`redis_sentinel_master_name`、`redis_sentinel_quorum`、`redis_persistence_mode`、`redis_maxmemory`、`redis_databases`、`redis_tcp_backlog`、`redis_apply_baseline`、`redis_data_dir`），不要凭节点数量假设有哨兵，也不要在单机方案上给出 `SENTINEL` 命令。
 
 ## 只读状态核对
 在已核实的业务节点上执行只读检查（注意不要在命令里明文嵌入密码，如需认证使用现场环境变量或交互方式）：

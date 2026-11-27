@@ -11,25 +11,18 @@ argument_specs:
         type: str
         default: "*"
         description: 监听网卡地址（* 表示全网卡）
-      postgresql_max_connections:
-        type: int
-        default: 200
-        description: 最大客户端并发连接数
-      postgresql_shared_buffers:
-        type: str
-        default: "512MB"
-        description: 共享内存缓冲区大小（推荐总内存的 25%）
-      postgresql_work_mem:
-        type: str
-        default: "16MB"
-        description: 单次排序/哈希操作内存上限
       postgresql_client_cidr:
         type: str
         default: "0.0.0.0/0"
-        description: 允许客户端接入的网段（写入 pg_hba.conf）
+        description: 允许客户端接入的主网段（写入 pg_hba.conf）
+      postgresql_extra_client_cidrs:
+        type: list
+        default: []
+        description: 额外放通的客户端网段列表（每行一个 CIDR）
       postgresql_superuser_password:
         type: str
         default: "ChangeMePg2026!"
+        no_log: true
         description: postgres 超级用户密码（scram-sha-256 认证）
       postgresql_replication_user:
         type: str
@@ -38,4 +31,89 @@ argument_specs:
       postgresql_replication_password:
         type: str
         default: "ChangeMeRepl2026!"
+        no_log: true
         description: 物理流复制账号密码
+      postgresql_max_connections:
+        type: int
+        default: 200
+        description: 最大客户端并发连接数
+      postgresql_shared_buffers:
+        type: str
+        default: "512MB"
+        description: 共享内存缓冲区大小（推荐总内存的 25%）
+      postgresql_effective_cache_size:
+        type: str
+        default: "1536MB"
+        description: 查询规划器估算可用操作系统缓存大小
+      postgresql_maintenance_work_mem:
+        type: str
+        default: "128MB"
+        description: VACUUM / CREATE INDEX 维护操作内存上限
+      postgresql_work_mem:
+        type: str
+        default: "16MB"
+        description: 单次排序/哈希操作内存上限
+      postgresql_wal_keep_size:
+        type: str
+        default: "256MB"
+        description: 为流复制从库保留的最小 WAL 大小
+      postgresql_min_wal_size:
+        type: str
+        default: "256MB"
+        description: WAL 回收保留下限
+      postgresql_max_wal_size:
+        type: str
+        default: "2GB"
+        description: 触发 Checkpoint 的最大 WAL 容量
+      postgresql_checkpoint_completion_target:
+        type: str
+        default: "0.9"
+        description: Checkpoint 平滑落盘时间占比（推荐 0.9）
+      postgresql_max_wal_senders:
+        type: int
+        default: 10
+        description: 最大 WAL 发送并发进程数
+      postgresql_max_replication_slots:
+        type: int
+        default: 10
+        description: 最大物理/逻辑复制槽数量
+      postgresql_hot_standby_feedback:
+        type: bool
+        default: true
+        description: 开启热备从库查询反馈防止主库 VACUUM 冲突
+      postgresql_log_min_duration_statement:
+        type: int
+        default: 1000
+        description: 慢 SQL 日志记录阈值（毫秒，-1 关闭）
+      postgresql_log_checkpoints:
+        type: bool
+        default: true
+        description: 是否记录 Checkpoint 检查点日志
+      postgresql_log_lock_waits:
+        type: bool
+        default: true
+        description: 是否记录锁等待超时日志
+      postgresql_idle_in_transaction_session_timeout:
+        type: int
+        default: 300000
+        description: 事务空闲超时强断时间（毫秒，默认 5 分钟）
+      postgresql_timezone:
+        type: str
+        default: "Asia/Shanghai"
+        description: 数据库默认时区
+      postgresql_apply_baseline:
+        type: bool
+        default: false
+        description: 是否自动写入 PostgreSQL 操作系统内核基线参数
+      postgresql_vm_swappiness:
+        type: int
+        default: 10
+        description: 内核 vm.swappiness（数据库建议 1-10 减少换出）
+      postgresql_somaxconn:
+        type: int
+        default: 4096
+        description: 内核 net.core.somaxconn 连接队列上限
+      postgresql_nofile:
+        type: int
+        default: 65535
+        description: PostgreSQL 进程最大文件描述符（systemd LimitNOFILE）

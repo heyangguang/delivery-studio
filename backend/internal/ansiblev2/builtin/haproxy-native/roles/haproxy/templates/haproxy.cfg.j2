@@ -15,12 +15,14 @@ defaults
     timeout client  {{ haproxy_timeout_client }}
     timeout server  {{ haproxy_timeout_server }}
 
+{% if haproxy_stats_enabled %}
 listen stats
     bind *:{{ haproxy_stats_port }}
     mode http
     stats enable
     stats uri /stats
     stats refresh 10s
+{% endif %}
 
 frontend app_frontend
     bind {{ haproxy_bind_address }}:{{ haproxy_frontend_port }}
@@ -31,5 +33,5 @@ backend app_backend
     mode {{ haproxy_mode }}
     balance {{ haproxy_balance }}
 {% for srv in haproxy_backend_servers %}
-    server srv{{ loop.index }} {{ srv }} check inter 3s fall 3 rise 2
+    server srv{{ loop.index }} {{ srv }} check inter {{ haproxy_check_interval }} fall {{ haproxy_check_fall }} rise {{ haproxy_check_rise }}
 {% endfor %}

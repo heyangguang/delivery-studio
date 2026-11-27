@@ -22,6 +22,10 @@ import (
 func (s *storeServer) componentSchema(w http.ResponseWriter, r *http.Request, name string) {
 	c, ok := s.plat.cat().Get(name)
 	if !ok {
+		if sc, ok2 := s.ansibleV2Schema(name, wLang(w)); ok2 {
+			s.writeJSON(w, 200, sc)
+			return
+		}
 		s.fail(w, 404, "组件不存在")
 		return
 	}
@@ -82,6 +86,18 @@ func (s *storeServer) resolve(w http.ResponseWriter, r *http.Request, session st
 	purpose := strings.TrimSpace(r.URL.Query().Get("purpose"))
 	if purpose == "verification" && !s.can(session.User, "component.edit") && !s.can(session.User, "component.publish") {
 		s.fail(w, 403, "只有组件维护者可以使用组件验证测试通道")
+		return
+	}
+	if v2View, ok2 := s.resolveAnsibleV2Deployment(d, wLang(w)); ok2 {
+		s.writeJSON(w, 200, map[string]any{
+			"plan":      v2View,
+			"artifacts": []any{},
+			"packages": map[string]any{
+				"platform": firstNonEmptyStr(d.Platform, "ubuntu-24.04-amd64"),
+				"total":    0,
+				"missing":  []any{},
+			},
+		})
 		return
 	}
 	plan := mwpack.Solve(s.plat.cat(), d)
@@ -245,6 +261,9 @@ func (s *storeServer) createJob(w http.ResponseWriter, r *http.Request, session 
 	}
 	if d.Schema == "" {
 		d.Schema = mwpack.DeploymentSchema
+	}
+	if s.createAnsibleV2JobFromDeployment(w, r, session, d, input.Revises) {
+		return
 	}
 	plan := mwpack.Solve(s.plat.cat(), d)
 	if err := mwpack.ValidateDeliveryMode(plan); err != nil {

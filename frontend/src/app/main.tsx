@@ -1503,9 +1503,20 @@ function App() {
 
   const loadApps = useCallback(async () => {
     try {
-      const list = await api<AppInfo[]>("/api/catalog");
-      registerStyles(list);
-      setApps(list);
+      const [v1List, v2List] = await Promise.all([
+        api<AppInfo[]>("/api/catalog"),
+        api<AppInfo[]>("/api/v2/ansible/catalog").catch(() => [] as AppInfo[]),
+      ]);
+      const seen = new Set<string>();
+      const merged: AppInfo[] = [];
+      for (const a of [...(Array.isArray(v2List) ? v2List : []), ...(Array.isArray(v1List) ? v1List : [])]) {
+        if (!seen.has(a.id)) {
+          seen.add(a.id);
+          merged.push(a);
+        }
+      }
+      registerStyles(merged);
+      setApps(merged);
       setAppsLoad("ready");
     } catch {
       setAppsLoad((s) => (s === "ready" ? s : "error"));

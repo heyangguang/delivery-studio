@@ -80,6 +80,26 @@
   tags:
     - configure
 
+- name: 写入 Patroni 操作系统内核基线与进程句柄上限
+  when: patroni_apply_baseline | bool
+  tags:
+    - baseline
+    - configure
+  block:
+    - name: 写入 /etc/sysctl.d/99-studio-patroni.conf 内核参数
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-studio-patroni.conf
+        mode: "0644"
+        content: |
+          vm.swappiness = {{ patroni_vm_swappiness }}
+          net.core.somaxconn = {{ patroni_somaxconn }}
+      register: patroni_sysctl_written
+
+    - name: 立即应用 sysctl 内核参数
+      ansible.builtin.command: sysctl --system
+      when: patroni_sysctl_written.changed
+      changed_when: true
+
 - name: 停止并禁用系统默认 postgresql 服务（由 Patroni 全权托管生命周期）
   ansible.builtin.systemd:
     name: "{{ item }}"

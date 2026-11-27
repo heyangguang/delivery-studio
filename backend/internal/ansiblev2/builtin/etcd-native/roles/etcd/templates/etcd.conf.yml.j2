@@ -11,4 +11,9 @@ initial-cluster-token: "{{ etcd_cluster_token }}"
 initial-cluster-state: "new"
 quota-backend-bytes: {{ etcd_quota_backend_bytes }}
 auto-compaction-retention: "{{ etcd_auto_compaction_retention }}"
+heartbeat-interval: {{ etcd_heartbeat_interval }}
+election-timeout: {{ etcd_election_timeout }}
+max-snapshots: {{ etcd_max_snapshots }}
+max-wals: {{ etcd_max_wals }}
+log-level: "{{ etcd_log_level }}"
 enable-grpc-gateway: true

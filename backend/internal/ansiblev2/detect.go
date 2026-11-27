@@ -750,9 +750,11 @@ func collectStringSlice(v any) []string {
 }
 
 // extractAllVars discovers variables natively from:
-//  1. meta/argument_specs.yml (Ansible 2.11+ official role schema)
-//  2. roles/*/defaults/main.yml
+//  1. meta/argument_specs.yml (Ansible 2.11+ official role schema, preserving YAML declaration order)
+//  2. roles/*/defaults/main.yml (preserving order + extracting YAML comments as descriptions/sections)
 //  3. group_vars/all.yml
+//  4. Playbook top-level vars:
+//  5. Automatic conditional visibility (when:) & semantic form grouping inferred from tasks & templates
 func extractAllVars(files map[string][]byte) []VarSpec {
 	byKey := map[string]VarSpec{}
 	order := []string{}
@@ -774,6 +776,18 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 			if prev.Type == "" && v.Type != "" {
 				prev.Type = v.Type
 			}
+			if prev.Group == "" && v.Group != "" {
+				prev.Group = v.Group
+			}
+			if prev.When == "" && v.When != "" {
+				prev.When = v.When
+			}
+			if !prev.Required && v.Required {
+				prev.Required = true
+			}
+			if !prev.Advanced && v.Advanced {
+				prev.Advanced = true
+			}
 			byKey[v.Key] = prev
 			return
 		}
@@ -783,45 +797,53 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 
 	paths := sortedKeys(files)
 
-	// 1. Official Ansible meta/argument_specs.yml
+	// 1. Official Ansible meta/argument_specs.yml (preserving exact YAML key order!)
 	for _, p := range paths {
 		base := strings.ToLower(path.Base(p))
 		if base != "argument_specs.yml" && base != "argument_specs.yaml" {
 			continue
 		}
-		var doc struct {
-			ArgumentSpecs map[string]struct {
-				Options map[string]struct {
+		var root yaml.Node
+		if err := yaml.Unmarshal(files[p], &root); err != nil || len(root.Content) == 0 {
+			continue
+		}
+		docNode := root.Content[0]
+		argSpecsNode := yamlMapGet(docNode, "argument_specs")
+		if argSpecsNode == nil || argSpecsNode.Kind != yaml.MappingNode {
+			continue
+		}
+		for i := 0; i+1 < len(argSpecsNode.Content); i += 2 {
+			entryVal := argSpecsNode.Content[i+1]
+			optsNode := yamlMapGet(entryVal, "options")
+			if optsNode == nil || optsNode.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j+1 < len(optsNode.Content); j += 2 {
+				kNode := optsNode.Content[j]
+				vNode := optsNode.Content[j+1]
+				k := strings.TrimSpace(kNode.Value)
+				if k == "" || strings.HasPrefix(k, "_") {
+					continue
+				}
+				var spec struct {
 					Type        string `yaml:"type"`
 					Required    bool   `yaml:"required"`
+					NoLog       bool   `yaml:"no_log"`
 					Default     any    `yaml:"default"`
 					Choices     []any  `yaml:"choices"`
 					Description any    `yaml:"description"`
-				} `yaml:"options"`
-			} `yaml:"argument_specs"`
-		}
-		if err := yaml.Unmarshal(files[p], &doc); err != nil {
-			continue
-		}
-		entryNames := make([]string, 0, len(doc.ArgumentSpecs))
-		for en := range doc.ArgumentSpecs {
-			entryNames = append(entryNames, en)
-		}
-		sort.Strings(entryNames)
-		for _, en := range entryNames {
-			opts := doc.ArgumentSpecs[en].Options
-			optKeys := make([]string, 0, len(opts))
-			for ok := range opts {
-				optKeys = append(optKeys, ok)
-			}
-			sort.Strings(optKeys)
-			for _, k := range optKeys {
-				spec := opts[k]
+				}
+				if err := vNode.Decode(&spec); err != nil {
+					continue
+				}
 				choices := make([]string, 0, len(spec.Choices))
 				for _, ch := range spec.Choices {
 					choices = append(choices, fmt.Sprint(ch))
 				}
 				vtype := normalizeAnsibleType(spec.Type, k, spec.Default, choices)
+				if spec.NoLog {
+					vtype = "secret"
+				}
 				record(VarSpec{
 					Key:         k,
 					Label:       humanizeVarKey(k),
@@ -836,32 +858,24 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 		}
 	}
 
-	// 2. Role defaults/main.yml
+	// 2. Role defaults/main.yml (preserving YAML order & reading head/line comments for zero-config roles!)
 	for _, p := range paths {
 		lp := strings.ToLower(p)
 		if !strings.HasSuffix(lp, "/defaults/main.yml") && !strings.HasSuffix(lp, "/defaults/main.yaml") &&
 			lp != "defaults/main.yml" && lp != "defaults/main.yaml" {
 			continue
 		}
-		var m map[string]any
-		if err := yaml.Unmarshal(files[p], &m); err != nil {
-			continue
-		}
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if strings.HasPrefix(k, "_") {
+		for _, item := range parseOrderedYAMLMapping(files[p]) {
+			if strings.HasPrefix(item.Key, "_") {
 				continue
 			}
 			record(VarSpec{
-				Key:     k,
-				Label:   humanizeVarKey(k),
-				Type:    normalizeAnsibleType("", k, m[k], nil),
-				Default: m[k],
-				Source:  "defaults",
+				Key:         item.Key,
+				Label:       humanizeVarKey(item.Key),
+				Type:        normalizeAnsibleType("", item.Key, item.Value, nil),
+				Default:     item.Value,
+				Description: item.Comment,
+				Source:      "defaults",
 			})
 		}
 	}
@@ -872,25 +886,17 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 		if lp != "group_vars/all.yml" && lp != "group_vars/all.yaml" && lp != "group_vars/all/main.yml" {
 			continue
 		}
-		var m map[string]any
-		if err := yaml.Unmarshal(files[p], &m); err != nil {
-			continue
-		}
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if strings.HasPrefix(k, "_") || strings.HasPrefix(k, "ansible_") {
+		for _, item := range parseOrderedYAMLMapping(files[p]) {
+			if strings.HasPrefix(item.Key, "_") || strings.HasPrefix(item.Key, "ansible_") {
 				continue
 			}
 			record(VarSpec{
-				Key:     k,
-				Label:   humanizeVarKey(k),
-				Type:    normalizeAnsibleType("", k, m[k], nil),
-				Default: m[k],
-				Source:  "group_vars",
+				Key:         item.Key,
+				Label:       humanizeVarKey(item.Key),
+				Type:        normalizeAnsibleType("", item.Key, item.Value, nil),
+				Default:     item.Value,
+				Description: item.Comment,
+				Source:      "group_vars",
 			})
 		}
 	}
@@ -907,33 +913,33 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 			strings.Contains(lp, "/host_vars/") {
 			continue
 		}
-		var plays []map[string]any
-		if err := yaml.Unmarshal(files[p], &plays); err != nil {
+		var root yaml.Node
+		if err := yaml.Unmarshal(files[p], &root); err != nil || len(root.Content) == 0 {
 			continue
 		}
-		for _, play := range plays {
-			if _, hasHosts := play["hosts"]; !hasHosts {
+		seq := root.Content[0]
+		if seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, playNode := range seq.Content {
+			if playNode.Kind != yaml.MappingNode || yamlMapGet(playNode, "hosts") == nil {
 				continue
 			}
-			vm, ok := play["vars"].(map[string]any)
-			if !ok {
+			varsNode := yamlMapGet(playNode, "vars")
+			if varsNode == nil || varsNode.Kind != yaml.MappingNode {
 				continue
 			}
-			keys := make([]string, 0, len(vm))
-			for k := range vm {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				if strings.HasPrefix(k, "_") || strings.HasPrefix(k, "ansible_") {
+			for _, item := range parseYAMLMappingNode(varsNode) {
+				if strings.HasPrefix(item.Key, "_") || strings.HasPrefix(item.Key, "ansible_") {
 					continue
 				}
 				record(VarSpec{
-					Key:     k,
-					Label:   humanizeVarKey(k),
-					Type:    normalizeAnsibleType("", k, vm[k], nil),
-					Default: vm[k],
-					Source:  "playbook_vars",
+					Key:         item.Key,
+					Label:       humanizeVarKey(item.Key),
+					Type:        normalizeAnsibleType("", item.Key, item.Value, nil),
+					Default:     item.Value,
+					Description: item.Comment,
+					Source:      "playbook_vars",
 				})
 			}
 		}
@@ -943,7 +949,418 @@ func extractAllVars(files map[string][]byte) []VarSpec {
 	for _, k := range order {
 		out = append(out, byKey[k])
 	}
+	// 5. Infer dynamic form conditions (when:) from Ansible tasks & Jinja2 templates, plus semantic form groups
+	enrichVarsFromAnsibleAST(files, out)
 	return out
+}
+
+type orderedYAMLItem struct {
+	Key     string
+	Value   any
+	Comment string
+}
+
+func yamlMapGet(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func parseOrderedYAMLMapping(raw []byte) []orderedYAMLItem {
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil || len(root.Content) == 0 {
+		return nil
+	}
+	return parseYAMLMappingNode(root.Content[0])
+}
+
+func parseYAMLMappingNode(m *yaml.Node) []orderedYAMLItem {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	out := make([]orderedYAMLItem, 0, len(m.Content)/2)
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		kn := m.Content[i]
+		vn := m.Content[i+1]
+		var val any
+		_ = vn.Decode(&val)
+		cmt := cleanYAMLComment(firstNonEmptyString(vn.LineComment, kn.HeadComment))
+		out = append(out, orderedYAMLItem{
+			Key:     strings.TrimSpace(kn.Value),
+			Value:   val,
+			Comment: cmt,
+		})
+	}
+	return out
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func cleanYAMLComment(raw string) string {
+	var lines []string
+	for _, ln := range strings.Split(raw, "\n") {
+		s := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(ln), "#"))
+		if s == "" || strings.Trim(s, "-=*") == "" {
+			continue
+		}
+		lines = append(lines, s)
+	}
+	return strings.Join(lines, " ")
+}
+
+var (
+	jinjaVarTokenRe      = regexp.MustCompile(`\b([a-zA-Z][a-zA-Z0-9_]{2,63})\b`)
+	jinjaIfBlockRe       = regexp.MustCompile(`(?s)\{%-?\s*if\s+([^%]+?)\s*-?%\}(.*?)\{%-?\s*(?:elif|else|endif)\b`)
+	condEqStrRe          = regexp.MustCompile(`^([a-zA-Z][a-zA-Z0-9_]*)(?:\s*\|\s*default\([^)]*\))?(?:\s*\|\s*(?:trim|lower|string))?\s*(==|!=)\s*['"]([^'"]+)['"]$`)
+	condBoolVarRe        = regexp.MustCompile(`^(?:not\s+)?\(?([a-zA-Z][a-zA-Z0-9_]*)(?:\s*\|\s*default\([^)]*\))?(?:\s*\|\s*bool)?\)?$`)
+	condGroupEmptyRe     = regexp.MustCompile(`groups\[['"]([a-zA-Z0-9_-]+)['"]\][^|]*\|\s*length\s*(==\s*0|>\s*0|>=\s*1)`)
+	condElseGroupEmptyRe = regexp.MustCompile(`(?s)\{%-?\s*if\s+[^%]*groups\[['"]([a-zA-Z0-9_-]+)['"]\][^%]*\|\s*length\s*>\s*0\s*-?%\}.*?\{%-?\s*else\s*-?%\}(.*?)\{%-?\s*endif\b`)
+)
+
+// enrichVarsFromAnsibleAST inspects Ansible tasks (when:) and Jinja2 templates ({% if ... %})
+// to automatically infer conditional form visibility, semantic form sections, and advanced toggles
+// purely from standard Ansible source code (zero hardcoded component logic!).
+func enrichVarsFromAnsibleAST(files map[string][]byte, vars []VarSpec) {
+	known := make(map[string]int, len(vars))
+	for i, v := range vars {
+		known[v.Key] = i
+	}
+	// Track every variable's guarded vs unguarded usage across tasks & templates.
+	// Using intersection across usage sites: if template uses var under {A} and verify task uses var under {A, B},
+	// the necessary condition is {A} (if A is false, var is never used anywhere!).
+	unguardedUse := map[string]bool{}
+	guardedIntersect := map[string]map[string]bool{}
+	addGuardedSet := func(varName string, conds []string) {
+		if len(conds) == 0 {
+			return
+		}
+		if _, ok := known[varName]; !ok {
+			return
+		}
+		cur := map[string]bool{}
+		for _, c := range conds {
+			if c != "" && !strings.HasPrefix(c, varName+" ") {
+				cur[c] = true
+			}
+		}
+		if len(cur) == 0 {
+			return
+		}
+		prev, exists := guardedIntersect[varName]
+		if !exists {
+			guardedIntersect[varName] = cur
+			return
+		}
+		for k := range prev {
+			if !cur[k] {
+				delete(prev, k)
+			}
+		}
+	}
+	addGuarded := func(varName, cond string) {
+		if cond != "" {
+			addGuardedSet(varName, []string{cond})
+		}
+	}
+
+	normalizeCond := func(raw string) string {
+		c := strings.TrimSpace(raw)
+		if c == "" {
+			return ""
+		}
+		if m := condGroupEmptyRe.FindStringSubmatch(c); len(m) == 3 {
+			op := strings.ReplaceAll(m[2], " ", "")
+			if op == "==0" {
+				return "group." + m[1] + " == 0"
+			}
+			return "group." + m[1] + " > 0"
+		}
+		// Check simple equality `foo == 'bar'` or `foo != 'bar'`
+		if m := condEqStrRe.FindStringSubmatch(c); len(m) == 4 {
+			if _, ok := known[m[1]]; ok {
+				return fmt.Sprintf("%s %s '%s'", m[1], m[2], m[3])
+			}
+		}
+		// Check simple boolean guard `foo | bool` or `not (foo | bool)`
+		neg := strings.HasPrefix(c, "not ")
+		trimmed := strings.TrimSpace(strings.TrimPrefix(c, "not "))
+		if m := condBoolVarRe.FindStringSubmatch(trimmed); len(m) == 2 {
+			if idx, ok := known[m[1]]; ok && vars[idx].Type == "bool" {
+				if neg {
+					return m[1] + " == false"
+				}
+				return m[1] + " == true"
+			}
+		}
+		return ""
+	}
+
+	extractNormalizedConds := func(whenField any) []string {
+		var raws []string
+		switch w := whenField.(type) {
+		case string:
+			raws = append(raws, w)
+		case []any:
+			for _, it := range w {
+				if s, ok := it.(string); ok {
+					raws = append(raws, s)
+				}
+			}
+		}
+		var out []string
+		for _, r := range raws {
+			for _, part := range strings.Split(r, " and ") {
+				if nc := normalizeCond(part); nc != "" {
+					out = append(out, nc)
+				}
+			}
+		}
+		return out
+	}
+
+	// Scan tasks/*.yml and playbooks/*.yml for task/block `when:` guards
+	var scanTaskList func(items []any, inheritedConds []string)
+	scanTaskList = func(items []any, inheritedConds []string) {
+		for _, rawIt := range items {
+			m, ok := rawIt.(map[string]any)
+			if !ok {
+				continue
+			}
+			conds := append([]string(nil), inheritedConds...)
+			conds = append(conds, extractNormalizedConds(m["when"])...)
+			if blk, ok := m["block"].([]any); ok {
+				scanTaskList(blk, conds)
+				continue
+			}
+		// Skip task/playbook diagnostic assertions and read-only probe/cleanup playbooks when determining
+		// whether a variable is unguarded in deployment templates/tasks.
+		if _, hasAssert := m["ansible.builtin.assert"]; hasAssert {
+			continue
+		}
+		if _, hasAssert := m["assert"]; hasAssert {
+			continue
+		}
+		if _, hasDebug := m["ansible.builtin.debug"]; hasDebug {
+			continue
+		}
+		if _, hasDebug := m["debug"]; hasDebug {
+			continue
+		}
+		// Collect variable names referenced in task module args (excluding `when:` itself)
+			var buf strings.Builder
+			for tk, tv := range m {
+				if tk == "when" || tk == "name" || tk == "tags" || tk == "register" || tk == "notify" {
+					continue
+				}
+				b, _ := yaml.Marshal(tv)
+				buf.Write(b)
+				buf.WriteByte('\n')
+			}
+			txt := buf.String()
+			for _, sm := range jinjaVarTokenRe.FindAllStringSubmatch(txt, -1) {
+				vn := sm[1]
+				if _, ok := known[vn]; !ok {
+					continue
+				}
+				if len(conds) == 0 {
+					unguardedUse[vn] = true
+				} else {
+					addGuardedSet(vn, conds)
+				}
+			}
+		}
+	}
+
+	for _, p := range sortedKeys(files) {
+		lp := strings.ToLower(p)
+		if p == ManifestFileName || strings.Contains(lp, "/defaults/") || strings.Contains(lp, "/meta/") || strings.Contains(lp, "/group_vars/") {
+			continue
+		}
+		// Templates (.j2): scan {% if ... %} blocks & unguarded lines
+		if strings.HasSuffix(lp, ".j2") {
+			src := string(files[p])
+			// Special case: {% if groups['X'] | length > 0 %} ... {% else %} ... {% endif %}
+			for _, m := range condElseGroupEmptyRe.FindAllStringSubmatch(src, -1) {
+				grpName := m[1]
+				elseBody := m[2]
+				for _, sm := range jinjaVarTokenRe.FindAllStringSubmatch(elseBody, -1) {
+					addGuarded(sm[1], "group."+grpName+" == 0")
+				}
+			}
+			// Regular {% if <cond> %} ... {% endif %} blocks
+			stripped := src
+			for _, m := range jinjaIfBlockRe.FindAllStringSubmatch(src, -1) {
+				condExpr := strings.TrimSpace(m[1])
+				body := m[2]
+				nc := normalizeCond(condExpr)
+				if nc != "" {
+					for _, sm := range jinjaVarTokenRe.FindAllStringSubmatch(body, -1) {
+						addGuarded(sm[1], nc)
+					}
+					stripped = strings.Replace(stripped, body, "", 1)
+				}
+			}
+			// Also strip elseBody from stripped before counting unguarded refs
+			for _, m := range condElseGroupEmptyRe.FindAllStringSubmatch(src, -1) {
+				stripped = strings.Replace(stripped, m[2], "", 1)
+			}
+			for _, sm := range jinjaVarTokenRe.FindAllStringSubmatch(stripped, -1) {
+				if _, ok := known[sm[1]]; ok {
+					unguardedUse[sm[1]] = true
+				}
+			}
+			continue
+		}
+		// Task YAML & Playbook YAML (skip read-only probe/cleanup diagnostic playbooks so deployment guards govern form visibility)
+		if isYAML(p) {
+			if strings.Contains(lp, "probe.yml") || strings.Contains(lp, "probe.yaml") || strings.Contains(lp, "cleanup.yml") || strings.Contains(lp, "cleanup.yaml") {
+				continue
+			}
+			var list []any
+			if err := yaml.Unmarshal(files[p], &list); err != nil {
+				continue
+			}
+			if strings.Contains(lp, "/tasks/") {
+				scanTaskList(list, nil)
+			} else {
+				// Playbook: inspect play tasks/pre_tasks/post_tasks
+				for _, pl := range list {
+					pm, ok := pl.(map[string]any)
+					if !ok {
+						continue
+					}
+					for _, sec := range []string{"pre_tasks", "tasks", "post_tasks"} {
+						if sub, ok := pm[sec].([]any); ok {
+							scanTaskList(sub, nil)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Apply inferred conditions & semantic groups to each VarSpec
+	for i := range vars {
+		v := &vars[i]
+		// Assign inferred When only if not explicitly declared AND variable is never used unguarded
+		if v.When == "" && !unguardedUse[v.Key] {
+			if cset := guardedIntersect[v.Key]; len(cset) > 0 {
+				cs := make([]string, 0, len(cset))
+				for c := range cset {
+					cs = append(cs, c)
+				}
+				sort.Strings(cs)
+				v.When = strings.Join(cs, " && ")
+			}
+		}
+		// Infer semantic form group + advanced flag
+		if v.Group == "" {
+			v.Group, v.Advanced = inferVarGroupAndAdvanced(v.Key, v.Type, v.When)
+		}
+		v.GroupLabel, v.GroupLabelEn = varGroupLabels(v.Group)
+		// Infer sensible unit/min/max hints
+		if v.Type == "port" && v.Min == nil && v.Max == nil {
+			lo, hi := 1, 65535
+			v.Min, v.Max = &lo, &hi
+		}
+		if v.Unit == "" {
+			lk := strings.ToLower(v.Key)
+			switch {
+			case strings.HasSuffix(lk, "_ms"):
+				v.Unit = "ms"
+			case strings.HasSuffix(lk, "_ttl") || strings.HasSuffix(lk, "_wait") || strings.HasSuffix(lk, "_timeout") && v.Type == "int" || strings.HasSuffix(lk, "_advert_int") || strings.HasSuffix(lk, "_keepalive"):
+				v.Unit = "s"
+			case strings.HasSuffix(lk, "_bytes") || strings.Contains(lk, "lag_on_failover"):
+				v.Unit = "bytes"
+			}
+		}
+	}
+}
+
+func inferVarGroupAndAdvanced(key, vtype, whenExpr string) (string, bool) {
+	lk := strings.ToLower(key)
+	// OS kernel baseline parameters
+	if strings.Contains(lk, "apply_baseline") || strings.Contains(lk, "vm_") ||
+		strings.Contains(lk, "somaxconn") || strings.Contains(lk, "nofile") ||
+		strings.Contains(lk, "nproc") || strings.Contains(lk, "thp") ||
+		strings.Contains(lk, "disable_swap") || strings.Contains(lk, "sysctl") ||
+		strings.Contains(lk, "syn_backlog") {
+		return "baseline", !strings.Contains(lk, "apply_baseline")
+	}
+	// Security & credentials
+	if vtype == "secret" || strings.Contains(lk, "password") || strings.Contains(lk, "secret") ||
+		strings.Contains(lk, "auth") || strings.Contains(lk, "tls") || strings.Contains(lk, "ssl") ||
+		strings.Contains(lk, "cert") || strings.Contains(lk, "cidr") || strings.Contains(lk, "_user") {
+		return "security", false
+	}
+	// HA, replication, failover, health checks, upstreams/backends
+	if strings.Contains(lk, "sentinel") || strings.Contains(lk, "repl") ||
+		strings.Contains(lk, "sync") || strings.Contains(lk, "failover") ||
+		strings.Contains(lk, "quorum") || strings.Contains(lk, "ttl") ||
+		strings.Contains(lk, "loop_wait") || strings.Contains(lk, "retry_timeout") ||
+		strings.Contains(lk, "heartbeat") || strings.Contains(lk, "election") ||
+		strings.Contains(lk, "vrrp") || strings.Contains(lk, "router_id") ||
+		strings.Contains(lk, "advert_int") || strings.Contains(lk, "check_") ||
+		strings.Contains(lk, "health_check") || strings.Contains(lk, "upstream") ||
+		strings.Contains(lk, "backend") || strings.Contains(lk, "external_etcd") ||
+		strings.Contains(lk, "hot_standby") || strings.Contains(lk, "max_fails") ||
+		strings.Contains(lk, "fail_timeout") {
+		return "ha", false
+	}
+	// Network & ports
+	if vtype == "port" || vtype == "ip" || strings.Contains(lk, "_port") ||
+		strings.Contains(lk, "listen") || strings.Contains(lk, "bind") ||
+		strings.Contains(lk, "address") || strings.Contains(lk, "vip") ||
+		strings.Contains(lk, "interface") || strings.Contains(lk, "protocol") ||
+		strings.Contains(lk, "resolve_ip") || strings.Contains(lk, "timeout") ||
+		strings.Contains(lk, "tcp_") || strings.Contains(lk, "keepalive") {
+		return "network", false
+	}
+	// Performance, memory, storage & logging
+	if strings.Contains(lk, "memory") || strings.Contains(lk, "buffer") ||
+		strings.Contains(lk, "cache") || strings.Contains(lk, "work_mem") ||
+		strings.Contains(lk, "wal") || strings.Contains(lk, "checkpoint") ||
+		strings.Contains(lk, "conn") || strings.Contains(lk, "worker") ||
+		strings.Contains(lk, "persist") || strings.Contains(lk, "data_dir") ||
+		strings.Contains(lk, "quota") || strings.Contains(lk, "compaction") ||
+		strings.Contains(lk, "snapshot") || strings.Contains(lk, "log") ||
+		strings.Contains(lk, "timezone") || strings.Contains(lk, "database") ||
+		strings.Contains(lk, "backlog") || strings.Contains(lk, "samples") {
+		return "tuning", false
+	}
+	return "basic", false
+}
+
+func varGroupLabels(g string) (string, string) {
+	switch g {
+	case "basic":
+		return "基础配置", "General"
+	case "network":
+		return "网络与端口", "Network & Ports"
+	case "ha":
+		return "高可用与流量治理", "HA, Replication & Health"
+	case "security":
+		return "安全与凭据", "Security & Access"
+	case "tuning":
+		return "性能、存储与日志", "Performance, Storage & Logs"
+	case "baseline":
+		return "操作系统内核基线", "OS Kernel Baseline"
+	default:
+		return "高级参数", "Advanced"
+	}
 }
 
 func normalizeAnsibleType(declared, key string, def any, choices []string) string {
@@ -951,7 +1368,7 @@ func normalizeAnsibleType(declared, key string, def any, choices []string) strin
 		return "select"
 	}
 	lk := strings.ToLower(key)
-	if strings.Contains(lk, "password") || strings.Contains(lk, "secret") || strings.Contains(lk, "token") {
+	if strings.Contains(lk, "password") || strings.Contains(lk, "secret") || strings.Contains(lk, "auth_pass") || (strings.Contains(lk, "token") && !strings.Contains(lk, "cluster_token")) {
 		return "secret"
 	}
 	switch strings.ToLower(strings.TrimSpace(declared)) {
@@ -966,7 +1383,15 @@ func normalizeAnsibleType(declared, key string, def any, choices []string) strin
 		return "list"
 	case "dict":
 		return "dict"
-	case "str", "string", "path", "raw":
+	case "path":
+		return "path"
+	case "str", "string", "raw":
+		if strings.Contains(lk, "cidr") {
+			return "cidr"
+		}
+		if strings.HasSuffix(lk, "_dir") || strings.HasSuffix(lk, "_path") || strings.HasSuffix(lk, "_file") {
+			return "path"
+		}
 		return "string"
 	}
 	switch def.(type) {
@@ -982,6 +1407,12 @@ func normalizeAnsibleType(declared, key string, def any, choices []string) strin
 	case map[string]any:
 		return "dict"
 	default:
+		if strings.Contains(lk, "cidr") {
+			return "cidr"
+		}
+		if strings.HasSuffix(lk, "_dir") || strings.HasSuffix(lk, "_path") || strings.HasSuffix(lk, "_file") {
+			return "path"
+		}
 		return "string"
 	}
 }
@@ -1038,9 +1469,31 @@ func mergeVarSpecs(discovered, declared []VarSpec) []VarSpec {
 			if v.Source == "" {
 				v.Source = d.Source
 			}
+			if v.Group == "" {
+				v.Group = d.Group
+			}
+			if v.When == "" {
+				v.When = d.When
+			}
+			if !v.Advanced && d.Advanced {
+				v.Advanced = d.Advanced
+			}
+			if v.Unit == "" {
+				v.Unit = d.Unit
+			}
+			if v.Min == nil {
+				v.Min = d.Min
+			}
+			if v.Max == nil {
+				v.Max = d.Max
+			}
 		} else if v.Source == "" {
 			v.Source = "manifest"
 		}
+		if v.Group == "" {
+			v.Group, v.Advanced = inferVarGroupAndAdvanced(v.Key, v.Type, v.When)
+		}
+		v.GroupLabel, v.GroupLabelEn = varGroupLabels(v.Group)
 		if v.Label == "" {
 			v.Label = humanizeVarKey(v.Key)
 		}

@@ -83,18 +83,25 @@ type SchemeSpec struct {
 }
 
 // VarSpec describes a standard Ansible variable (auto-extracted from meta/argument_specs.yml,
-// defaults/main.yml, group_vars/all.yml, or declared explicitly in delivery-studio.yaml).
+// defaults/main.yml, group_vars/all.yml, playbooks, or declared explicitly in delivery-studio.yaml).
 type VarSpec struct {
-	Key         string   `yaml:"key" json:"key"`
-	Label       string   `yaml:"label,omitempty" json:"label,omitempty"`
-	LabelEn     string   `yaml:"label_en,omitempty" json:"label_en,omitempty"`
-	Group       string   `yaml:"group,omitempty" json:"group,omitempty"`
-	Type        string   `yaml:"type,omitempty" json:"type,omitempty"` // string | int | bool | select | list | dict | secret | port
-	Default     any      `yaml:"default,omitempty" json:"default,omitempty"`
-	Required    bool     `yaml:"required,omitempty" json:"required,omitempty"`
-	Choices     []string `yaml:"choices,omitempty" json:"choices,omitempty"`
-	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
-	Source      string   `yaml:"source,omitempty" json:"source,omitempty"` // argument_specs | defaults | group_vars | manifest
+	Key          string   `yaml:"key" json:"key"`
+	Label        string   `yaml:"label,omitempty" json:"label,omitempty"`
+	LabelEn      string   `yaml:"label_en,omitempty" json:"label_en,omitempty"`
+	Group        string   `yaml:"group,omitempty" json:"group,omitempty"`
+	GroupLabel   string   `yaml:"-" json:"group_label,omitempty"`
+	GroupLabelEn string   `yaml:"-" json:"group_label_en,omitempty"`
+	Type         string   `yaml:"type,omitempty" json:"type,omitempty"` // string | int | bool | select | list | dict | secret | port | cidr | ip | path
+	Default      any      `yaml:"default,omitempty" json:"default,omitempty"`
+	Required     bool     `yaml:"required,omitempty" json:"required,omitempty"`
+	Choices      []string `yaml:"choices,omitempty" json:"choices,omitempty"`
+	When         string   `yaml:"when,omitempty" json:"when,omitempty"`
+	Advanced     bool     `yaml:"advanced,omitempty" json:"advanced,omitempty"`
+	Unit         string   `yaml:"unit,omitempty" json:"unit,omitempty"`
+	Min          *int     `yaml:"min,omitempty" json:"min,omitempty"`
+	Max          *int     `yaml:"max,omitempty" json:"max,omitempty"`
+	Description  string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Source       string   `yaml:"source,omitempty" json:"source,omitempty"` // argument_specs | defaults | group_vars | playbook_vars | template | manifest
 }
 
 // PackageHint declares or auto-discovers OS packages needed for air-gapped repository bundling.

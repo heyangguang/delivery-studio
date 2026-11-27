@@ -26,5 +26,8 @@ description: HAProxy 后端健康检查、配置校验与平滑重载，keepaliv
   - **禁止教条拒收有效实测结果**：只要从非主库节点连 VIP **实际连接成功并返回了目标主库 IP 且可读写**，即已证明 ELB 路由生效，直接认可为有效验收证据；
   - 只有当从后端节点侧连 VIP **确实报超时/RST** 时，才需区分是「ELB 回环限制」还是「入口真实故障」，建议改由业务端验证或改验各节点健康检查接口，切勿误判为服务不可用或把无独立跳板机的现场卡死。
 
-## 平台实际配置优先
-当前模板仅按 stats_enabled 开启本机 stats HTTP 页面，未默认声明 admin.sock；不要生成不存在的套接字命令。健康检查地址/端口读取交付端点，不固定套用 8008。external-lb 仍受支持但只登记入口，不代表平台已配置云 ELB。SELinux 先核对 AVC 与最小放行范围，不默认放开 haproxy_connect_any。
+## 平台实际配置优先（兼容 Ansible 2.0 `haproxy-native` / `keepalived-native` / `external-lb-native`）
+- `haproxy-native`：按 `haproxy_stats_enabled` 动态联动开启 Stats 监控页（`haproxy_stats_port`，默认 8404），支持 `haproxy_check_interval` / `haproxy_check_fall` / `haproxy_check_rise` / `haproxy_maxconn` 调优；未默认声明 `admin.sock`，不要生成不存在的套接字命令。
+- `keepalived-native`：支持 `keepalived_interface: auto` 自动识别默认网卡，配置 `keepalived_vip` / `keepalived_vip_prefix` / `keepalived_router_id` / `keepalived_advert_int`。
+- `external-lb-native`：面向云 ELB / F5 硬件负载均衡生成标准配置清单（`checklist.md` + `listeners.json`），支持 `elb_mode`（`ip` / `domain` 自动联动 `elb_resolve_ip`）与 `elb_health_check_type`（`tcp` / `http` 自动联动 `elb_health_check_path`），并在 `elb_verify_frontend=true` 时核验前端入口连通性，但不自动调用云厂商 API 创建 ELB。
+- SELinux 先核对 AVC 与最小放行范围，不默认放开 `haproxy_connect_any`。

@@ -15,33 +15,100 @@ argument_specs:
         type: int
         default: 26379
         description: Redis Sentinel 哨兵端口（有哨兵节点时生效）
-      redis_maxmemory:
-        type: str
-        default: "4gb"
-        description: 最大内存上限（例如 2gb、6gb）
-      redis_maxmemory_policy:
-        type: str
-        default: "allkeys-lru"
-        choices: ["allkeys-lru", "volatile-lru", "allkeys-lfu", "noeviction"]
-        description: 内存淘汰策略
-      redis_persistence_mode:
-        type: str
-        default: "none"
-        choices: ["none", "rdb", "aof"]
-        description: 持久化模式：none（纯缓存）、rdb 或 aof
       redis_password:
         type: str
         default: ""
+        no_log: true
         description: 访问认证密码（留空则不设密码，生产建议配置强密码）
       redis_data_dir:
         type: str
         default: "/var/lib/redis"
         description: 数据目录路径
-      redis_sentinel_quorum:
+      redis_maxmemory:
+        type: str
+        default: "4gb"
+        description: 最大内存上限（例如 1gb、4gb、6gb）
+      redis_maxmemory_policy:
+        type: str
+        default: "allkeys-lru"
+        choices: ["allkeys-lru", "volatile-lru", "allkeys-lfu", "volatile-lfu", "noeviction"]
+        description: 内存淘汰策略
+      redis_maxmemory_samples:
         type: int
-        default: 2
-        description: 哨兵故障转移仲裁票数
+        default: 5
+        description: LRU/LFU 淘汰采样键数量
+      redis_persistence_mode:
+        type: str
+        default: "none"
+        choices: ["none", "rdb", "aof", "mixed"]
+        description: 持久化模式：none（纯缓存）、rdb、aof 或 mixed（RDB+AOF 混合）
+      redis_databases:
+        type: int
+        default: 16
+        description: 逻辑数据库数量（databases）
+      redis_tcp_backlog:
+        type: int
+        default: 511
+        description: TCP 全连接队列长度（tcp-backlog）
+      redis_tcp_keepalive:
+        type: int
+        default: 300
+        description: TCP 保活探测周期（秒）
+      redis_client_timeout:
+        type: int
+        default: 0
+        description: 客户端空闲断开超时（秒，0 表示永不主动断开）
+      redis_loglevel:
+        type: str
+        default: "notice"
+        choices: ["debug", "verbose", "notice", "warning"]
+        description: Redis 运行日志级别
+      redis_repl_diskless_sync:
+        type: str
+        default: "yes"
+        choices: ["yes", "no"]
+        description: 主从全量同步是否启用无盘复制（repl-diskless-sync）
+      redis_repl_backlog_size:
+        type: str
+        default: "64mb"
+        description: 主从增量复制积压缓冲区大小（repl-backlog-size）
+      redis_replica_priority:
+        type: int
+        default: 100
+        description: 从库参与选主优先级（越小越优先，0 表示永不升主）
       redis_sentinel_master_name:
         type: str
         default: "mymaster"
         description: Sentinel 监控主库逻辑名
+      redis_sentinel_quorum:
+        type: int
+        default: 2
+        description: 哨兵故障转移仲裁票数（quorum）
+      redis_sentinel_down_after_ms:
+        type: int
+        default: 5000
+        description: 哨兵判定主库主观下线超时（毫秒）
+      redis_sentinel_failover_timeout_ms:
+        type: int
+        default: 60000
+        description: 哨兵主从故障切换总超时（毫秒）
+      redis_sentinel_parallel_syncs:
+        type: int
+        default: 1
+        description: 故障切换后允许并发同步新主库的从库数量
+      redis_apply_baseline:
+        type: bool
+        default: false
+        description: 是否自动写入操作系统内核基线与进程句柄上限（sysctl + LimitNOFILE）
+      redis_vm_overcommit_memory:
+        type: int
+        default: 1
+        description: 内核 vm.overcommit_memory（建议设为 1 防止 RDB/AOF fork 失败）
+      redis_somaxconn:
+        type: int
+        default: 4096
+        description: 内核 net.core.somaxconn 连接队列上限
+      redis_nofile:
+        type: int
+        default: 65535
+        description: Redis 进程最大文件描述符（systemd LimitNOFILE）

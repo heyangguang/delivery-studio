@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Button,
   InputNumber,
   Input,
   InputTag,
@@ -158,6 +159,17 @@ const num = (v: unknown): number | undefined => {
 
 export const isExpr = (v: unknown) =>
   typeof v === "string" && v.startsWith("=");
+
+function genStrongSecret(len = 16): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%^*";
+  const arr = new Uint32Array(len);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < len; i++) arr[i] = Math.floor(Math.random() * chars.length);
+  }
+  return Array.from(arr, (n) => chars[n % chars.length]).join("");
+}
 export const showValue = (v: unknown): string =>
   Array.isArray(v)
     ? v.join(bi("、", ", "))
@@ -293,6 +305,82 @@ export const ParamField = React.memo(function ParamField({
       );
       break;
     }
+    case "list": {
+      const list = Array.isArray(value)
+        ? (value as unknown[]).map((x) => String(x))
+        : typeof value === "string" && value.trim()
+          ? value
+              .split(/\r?\n|,/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : EMPTY_STRINGS;
+      control = (
+        <InputTag
+          className="mono-in"
+          allowClear
+          saveOnBlur
+          animation={false}
+          tokenSeparators={[",", "，", ";", "；"]}
+          value={list}
+          placeholder={bi("输入后回车添加多项", "Type item and press Enter")}
+          status={bad ? "error" : undefined}
+          onChange={(vals) => {
+            const next = vals.map((x) => String(x).trim()).filter(Boolean);
+            commit(next);
+          }}
+          {...({ "aria-label": d.label } as Record<string, string>)}
+        />
+      );
+      break;
+    }
+    case "dict": {
+      const strVal =
+        value === undefined || value === null
+          ? ""
+          : typeof value === "string"
+            ? value
+            : JSON.stringify(value, null, 2);
+      control = (
+        <Input.TextArea
+          autoSize={{ minRows: 2, maxRows: 6 }}
+          className="mono-in"
+          placeholder='{"key": "value"}'
+          value={strVal}
+          status={bad ? "error" : undefined}
+          onChange={(nv) => {
+            try {
+              commit(JSON.parse(nv));
+            } catch {
+              commit(nv);
+            }
+          }}
+          aria-label={d.label}
+        />
+      );
+      break;
+    }
+    case "secret":
+      control = (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", width: "100%" }}>
+          <Input.Password
+            value={String(value ?? "")}
+            placeholder={bi("留空则使用默认或自动生成", "Leave blank for default")}
+            onChange={(nv) => commit(nv)}
+            status={bad ? "error" : undefined}
+            aria-label={d.label}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="small"
+            type="secondary"
+            style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+            onClick={() => commit(genStrongSecret())}
+          >
+            {bi("随机生成", "Generate")}
+          </Button>
+        </div>
+      );
+      break;
     default:
       control = (
         <BufferedParamInput
@@ -316,6 +404,15 @@ export const ParamField = React.memo(function ParamField({
       <div className="param-text">
         <div className="param-label">
           <label>{d.label}</label>
+          {d.when && (
+            <span
+              className="flag"
+              title={bi(`由 Ansible 条件自动联动显现：${d.when}`, `Dynamically shown by Ansible condition: ${d.when}`)}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              {bi("条件联动", "Dynamic")}
+            </span>
+          )}
           {d.restart && <span className="flag">{bi("重启生效", "Restart req.")}</span>}
           {d.required && <span className="flag req">{bi("必填", "Required")}</span>}
         </div>

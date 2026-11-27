@@ -356,11 +356,12 @@ func localizedSkills(lang string, src []aiSkill) []aiSkill {
 	}
 	skillTextEn := map[string]struct{ title, desc string }{
 		"ansible-debug":        {"Ansible Troubleshooting", "Diagnose failing Ansible playbooks: unreachable hosts, privilege escalation, module errors, undefined variables, idempotency, and missing offline dependencies."},
+		"ansible-v2-standards": {"Ansible 2.0 Native & Dynamic Form Standards", "Kyndryl Delivery Studio 2.0 pure native Ansible architecture: standard project layout, AST dynamic forms & conditional visibility, offline bundles, automated execution (--check --diff), and brownfield adoption."},
 		"automatic-execution":  {"Automatic Execution & Streaming", "Independent or in-cluster executors, bastion target agents, grants and readiness checks, immutable snapshots, log streaming, and execution reports."},
 		"change-rehearsal":     {"Guided Change Rehearsal & SOP", "Safe 4-step workflow for live cluster scaling, tuning, patching, or upgrades: align scope, run read-only discovery, rehearse in staging, and finalize production SOP."},
-		"component-authoring":  {"Component Authoring Standards", "Authoring rules for component.yaml and Ansible roles: declarative specs, idempotent tasks, checks and rollbacks, secrets handling, and change steps."},
+		"component-authoring":  {"Ansible 2.0 Component Authoring Standards", "Authoring rules for pure native Ansible 2.0 components (Roles/Collections/Playbooks): zero proprietary DSL, AST dynamic form variables & guards, idempotency, and offline/automated delivery."},
 		"delivery-review":      {"Delivery Review Checklist", "Review middleware deliveries across HA architecture, role counts, parameter risks, disk and resource sizing, backup/recovery, security baseline, and rollback."},
-		"deployment-form":      {"Assisted Deployment Form", "Turn natural-language cluster requirements (hosts, subnets, VIPs, sizing) into validated deployment specs inside the creation wizard."},
+		"deployment-form":      {"Assisted Deployment Form (Ansible 2.0)", "Turn natural-language cluster requirements into validated deployment specs inside the classic New Delivery wizard for all native Ansible 2.0 components and imported roles/playbooks."},
 		"document-writing":     {"Operations Docs & Reports", "Structure, tone, and checklists for deployment guides, change notes, inspection reports, runbooks, and handover summaries."},
 		"etcd-ops":             {"etcd Cluster Operations", "etcd health checks, member management, NOSPACE quota alerts, compaction and defragmentation, snapshot backup/restore, and election/disk latency tuning."},
 		"haproxy-keepalived":   {"Load Balancing & VIP", "HAProxy backend health checks, config validation, graceful reloads, and keepalived VIP failover, split-brain, and VRRP troubleshooting."},

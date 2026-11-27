@@ -1,0 +1,39 @@
+---
+- name: 确保配置单输出目录存在
+  ansible.builtin.file:
+    path: "{{ elb_output_dir }}"
+    state: directory
+    mode: "0755"
+  tags:
+    - checklist
+
+- name: 生成外部负载均衡配置清单（Markdown）
+  ansible.builtin.template:
+    src: checklist.md.j2
+    dest: "{{ elb_output_dir }}/checklist.md"
+    mode: "0644"
+  tags:
+    - checklist
+
+- name: 生成外部负载均衡结构化配置单（JSON）
+  ansible.builtin.template:
+    src: listeners.json.j2
+    dest: "{{ elb_output_dir }}/listeners.json"
+    mode: "0644"
+  tags:
+    - checklist
+
+- name: 读取并展示生成的配置单摘要
+  ansible.builtin.slurp:
+    src: "{{ elb_output_dir }}/checklist.md"
+  register: rendered_checklist
+  when: not ansible_check_mode
+  tags:
+    - checklist
+
+- name: 打印外部负载均衡配置清单内容
+  ansible.builtin.debug:
+    msg: "{{ (rendered_checklist.content | b64decode).splitlines() }}"
+  when: not ansible_check_mode
+  tags:
+    - checklist

@@ -1,0 +1,25 @@
+{
+  "schema": "delivery-studio/external-lb-checklist/v2",
+  "vendor": {{ elb_vendor | to_json }},
+  "mode": {{ elb_mode | to_json }},
+  "frontend": {
+    "address": {{ elb_address | to_json }},
+    "resolve_ip": {{ elb_resolve_ip | to_json }},
+    "protocol": {{ elb_protocol | to_json }},
+    "port": {{ elb_frontend_port | int }}
+  },
+  "health_check": {
+    "type": {{ elb_health_check_type | to_json }},
+    "port": {{ elb_health_check_port | int }},
+    "path": {{ elb_health_check_path | to_json }}
+  },
+  "backends": [
+{% for h in groups['backends'] | default([]) %}
+    {
+      "name": {{ h | to_json }},
+      "host": {{ (hostvars[h]['ansible_host'] | default(h)) | to_json }},
+      "port": {{ elb_backend_port | int }}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ]
+}

@@ -7,8 +7,27 @@ import (
 
 func TestBuiltinComponentsInspectAndRender(t *testing.T) {
 	names := BuiltinNames()
-	if len(names) < 2 {
-		t.Fatalf("expected at least 2 builtin v2 components, got %v", names)
+	wantAll := []string{
+		"etcd-native",
+		"external-lb-native",
+		"haproxy-native",
+		"keepalived-native",
+		"nginx-native",
+		"patroni-native",
+		"postgresql-native",
+		"redis-native",
+	}
+	if len(names) < len(wantAll) {
+		t.Fatalf("expected all %d builtin v2 components (%v), got %v", len(wantAll), wantAll, names)
+	}
+	nameSet := map[string]bool{}
+	for _, n := range names {
+		nameSet[n] = true
+	}
+	for _, w := range wantAll {
+		if !nameSet[w] {
+			t.Fatalf("missing required builtin v2 component %q in %v", w, names)
+		}
 	}
 	for _, name := range names {
 		files, ok := LoadBuiltinFiles(name)
@@ -19,22 +38,26 @@ func TestBuiltinComponentsInspectAndRender(t *testing.T) {
 		if !rep.Valid {
 			t.Fatalf("builtin %s failed validation: %+v", name, rep.Problems)
 		}
-		if rep.Manifest.Entrypoints.Deploy == "" {
-			t.Fatalf("builtin %s missing deploy entrypoint", name)
+		if rep.Manifest.Entrypoints.Deploy == "" || rep.Manifest.Entrypoints.Verify == "" || rep.Manifest.Entrypoints.Probe == "" || rep.Manifest.Entrypoints.Cleanup == "" {
+			t.Fatalf("builtin %s must declare full deploy/verify/probe/cleanup entrypoints, got %+v", name, rep.Manifest.Entrypoints)
 		}
 		if len(rep.Vars) == 0 {
 			t.Fatalf("builtin %s expected extracted vars from meta/argument_specs.yml", name)
 		}
-		if len(rep.Packages) == 0 {
+		if name != "external-lb-native" && len(rep.Packages) == 0 {
 			t.Fatalf("builtin %s expected auto-detected packages from package tasks", name)
 		}
 		if len(rep.Steps) == 0 {
 			t.Fatalf("builtin %s expected parsed play steps", name)
 		}
+		hostGroups := []string{rep.Manifest.Groups[0].Name}
+		if name == "patroni-native" {
+			hostGroups = []string{"patroni", "etcd"}
+		}
 		res, err := Render(files, rep.Manifest, RenderRequest{
 			ClusterID: "demo-" + name,
 			Hosts: []RenderHost{
-				{Name: "node-01", IP: "10.0.1.11", Groups: []string{rep.Manifest.Groups[0].Name}},
+				{Name: "node-01", IP: "10.0.1.11", Groups: hostGroups},
 			},
 			Vars: map[string]any{"custom_tag": "ok"},
 		})

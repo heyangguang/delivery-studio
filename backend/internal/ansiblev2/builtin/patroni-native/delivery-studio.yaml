@@ -1,0 +1,81 @@
+schema: studio/v2
+name: patroni-native
+title: Patroni 高可用 PostgreSQL（原生 Ansible 2.0）
+title_en: Patroni PostgreSQL HA Cluster (Native Ansible 2.0)
+category: 数据库
+version: "3.2"
+summary: 100% 标准 Ansible Role 驱动的 Patroni + PostgreSQL + etcd 自动高可用数据库集群，支持自动选主、WAL 流复制、pg_rewind 脑裂自愈与 REST 探活接口。
+summary_en: 100% standard Ansible Role-driven Patroni + PostgreSQL + etcd HA cluster with automatic failover, WAL streaming, pg_rewind, and REST health endpoints.
+icon: patroni
+color: blue
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: patroni
+    title: Patroni + PostgreSQL 节点
+    title_en: Patroni + PostgreSQL Nodes
+    min: 1
+    max: 5
+    default_count: 3
+    exclusive: true
+  - name: etcd
+    title: etcd DCS 仲裁节点（可与 Patroni 同机复用，留空则连外部 etcd）
+    title_en: etcd DCS Quorum Nodes (co-locatable; empty uses external etcd)
+    min: 0
+    max: 5
+    default_count: 3
+schemes:
+  - id: ha-3-colocated
+    title: 三节点融合高可用（Patroni + etcd 同机）
+    title_en: 3-Node Co-located Patroni + etcd HA
+    summary: 3 台节点同机部署 Patroni + PostgreSQL + etcd 多数派仲裁，自动选主与故障切换（推荐标准方案）
+    group_counts:
+      patroni: 3
+      etcd: 3
+    vars:
+      patroni_shared_buffers: "512MB"
+      patroni_max_connections: 300
+      patroni_synchronous_mode: false
+  - id: ha-2-ext-dcs
+    title: 双节点 Patroni + 外部 etcd
+    title_en: 2-Node Patroni + External etcd
+    summary: 2 台 Patroni 数据库节点接入已有独立 etcd 集群（需填写 patroni_external_etcd_hosts）
+    group_counts:
+      patroni: 2
+      etcd: 0
+    vars:
+      patroni_shared_buffers: "1GB"
+      patroni_max_connections: 400
+  - id: ha-3-sync
+    title: 三节点强一致同步高可用（Synchronous）
+    title_en: 3-Node Synchronous HA
+    summary: 3 台 Patroni + etcd 启用同步提交模式（synchronous_mode=true），零数据丢失保障
+    group_counts:
+      patroni: 3
+      etcd: 3
+    vars:
+      patroni_shared_buffers: "1GB"
+      patroni_max_connections: 400
+      patroni_synchronous_mode: true
+ports:
+  - name: postgres
+    var: patroni_pg_port
+    protocol: tcp
+  - name: restapi
+    var: patroni_restapi_port
+    protocol: tcp
+  - name: etcd
+    var: patroni_etcd_port
+    protocol: tcp
+tags:
+  - 数据库
+  - 高可用
+  - Patroni
+  - 原生 Ansible

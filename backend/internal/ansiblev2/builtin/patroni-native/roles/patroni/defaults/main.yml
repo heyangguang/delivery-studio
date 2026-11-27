@@ -1,0 +1,17 @@
+---
+patroni_scope: "studio-pg-ha"
+patroni_pg_port: 5432
+patroni_restapi_port: 8008
+patroni_etcd_port: 2379
+patroni_external_etcd_hosts: ""
+patroni_data_dir: "/var/lib/postgresql/patroni"
+patroni_client_cidr: "0.0.0.0/0"
+patroni_superuser_password: "PatroniAdmin2026!"
+patroni_replication_user: "replicator"
+patroni_replication_password: "PatroniRepl2026!"
+patroni_shared_buffers: "512MB"
+patroni_max_connections: 300
+patroni_synchronous_mode: false
+patroni_ttl: 30
+patroni_loop_wait: 10
+patroni_retry_timeout: 10

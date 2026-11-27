@@ -1,0 +1,167 @@
+---
+- name: 校验 etcd DCS 配置来源（同机 etcd 组或外部地址）
+  ansible.builtin.assert:
+    that:
+      - "(groups['etcd'] | default([]) | length) > 0 or (patroni_external_etcd_hosts | default('') | trim | length) > 0"
+    fail_msg: "请至少分配 1 台 etcd 节点，或在变量 patroni_external_etcd_hosts 中填写外部 etcd 地址（例如 10.0.0.11:2379）"
+  run_once: true
+  tags:
+    - configure
+
+- name: 检测本机是否已安装 Patroni 与 PostgreSQL
+  ansible.builtin.shell: "command -v patroni >/dev/null 2>&1 && command -v psql >/dev/null 2>&1"
+  register: patroni_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags:
+    - install
+
+- name: 更新软件源索引（Debian/Ubuntu 按需刷新）
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - patroni_installed.rc != 0
+  failed_when: false
+  tags:
+    - install
+
+- name: 安装 PostgreSQL 与 Patroni 软件包（Debian/Ubuntu）
+  ansible.builtin.package:
+    name:
+      - postgresql
+      - postgresql-client
+      - patroni
+      - python3-psycopg2
+      - python3-etcd
+    state: present
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - patroni_installed.rc != 0
+  tags:
+    - install
+
+- name: 安装 PostgreSQL 与 Patroni 软件包（RHEL/Rocky/Kylin）
+  ansible.builtin.package:
+    name:
+      - postgresql-server
+      - postgresql
+      - patroni
+      - patroni-etcd
+      - python3-psycopg2
+    state: present
+  when:
+    - ansible_facts['os_family'] != 'Debian'
+    - patroni_installed.rc != 0
+  tags:
+    - install
+
+- name: 探测 PostgreSQL 可执行文件目录
+  ansible.builtin.shell: |
+    if [ -d /usr/lib/postgresql ]; then
+      ver=$(ls -1 /usr/lib/postgresql | sort -V | tail -n 1)
+      echo "/usr/lib/postgresql/${ver}/bin"
+    elif ls -d /usr/pgsql-*/bin >/dev/null 2>&1; then
+      ls -d /usr/pgsql-*/bin | sort -V | tail -n 1
+    else
+      echo "/usr/bin"
+    fi
+  register: pg_bin_detect
+  changed_when: false
+  check_mode: false
+  tags:
+    - configure
+
+- name: 设置 PostgreSQL 二进制路径变量
+  ansible.builtin.set_fact:
+    patroni_pg_bin_dir: "{{ pg_bin_detect.stdout | default('/usr/lib/postgresql/16/bin') | trim }}"
+  tags:
+    - configure
+
+- name: 停止并禁用系统默认 postgresql 服务（由 Patroni 全权托管生命周期）
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - postgresql
+  failed_when: false
+  tags:
+    - configure
+
+- name: 确保 Patroni 配置与数据目录存在
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "/etc/patroni", mode: "0750" }
+    - { path: "{{ patroni_data_dir }}", mode: "0700" }
+  tags:
+    - configure
+
+- name: 写入标准 /etc/patroni/patroni.yml 集群配置
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: /etc/patroni/patroni.yml
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  notify: reload patroni
+  tags:
+    - configure
+
+- name: 写入 Patroni systemd 服务单元文件
+  ansible.builtin.template:
+    src: patroni.service.j2
+    dest: /etc/systemd/system/patroni.service
+    mode: "0644"
+  tags:
+    - configure
+
+- name: 重载 systemd 并启用 patroni 开机自启
+  ansible.builtin.systemd:
+    name: patroni
+    daemon_reload: true
+    enabled: true
+  tags:
+    - start
+
+- name: 启动 Patroni 高可用服务（自动经 etcd 选主并拉起流复制从库）
+  ansible.builtin.systemd:
+    name: patroni
+    state: started
+  tags:
+    - start
+
+- name: 等待本节点 Patroni REST API 存活就绪
+  ansible.builtin.uri:
+    url: "http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_restapi_port }}/liveness"
+    status_code: 200
+    timeout: 5
+  register: patroni_liveness_wait
+  until: patroni_liveness_wait.status | default(0) == 200
+  retries: 24
+  delay: 3
+  when: not ansible_check_mode
+  tags:
+    - start
+
+- name: 等待全集群选主完成且全部从库进入 streaming 流复制态
+  ansible.builtin.command: patronictl -c /etc/patroni/patroni.yml list -f json
+  register: patroni_ready_list
+  until: >
+    (patroni_ready_list.rc == 0) and
+    ((patroni_ready_list.stdout | from_json | selectattr('Role', 'in', ['Leader', 'primary', 'master']) | list | length) == 1) and
+    ((patroni_ready_list.stdout | from_json | selectattr('State', 'in', ['running', 'streaming']) | list | length) == (groups['patroni'] | length))
+  retries: 30
+  delay: 3
+  run_once: true
+  changed_when: false
+  when: not ansible_check_mode
+  tags:
+    - start

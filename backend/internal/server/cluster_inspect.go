@@ -132,7 +132,9 @@ func buildLiveInspectScript(f clusterFacts, dep *mwpack.Deployment, overrides cl
 				for _, pk := range []string{
 					"port", "tls_port", "http_port", "https_port", "client_port", "stats_port",
 					"nginx_listen_port", "redis_port", "redis_sentinel_port", "pg_port",
-					"etcd_client_port", "haproxy_frontend_port", "haproxy_stats_port", "node_exporter_port",
+					"postgresql_port", "patroni_pg_port", "patroni_restapi_port", "patroni_etcd_port",
+					"etcd_client_port", "haproxy_frontend_port", "haproxy_stats_port",
+					"elb_frontend_port", "elb_backend_port", "node_exporter_port",
 				} {
 					if raw, ok := inst.Params[pk]; ok {
 						if pn, err := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", raw))); err == nil {
@@ -149,9 +151,12 @@ func buildLiveInspectScript(f clusterFacts, dep *mwpack.Deployment, overrides cl
 	extraLogDirs = mergeUniqueStrings(extraLogDirs, overrides.LogDirs)
 
 	switch {
-	case strings.Contains(appID, "postgres"):
+	case strings.Contains(appID, "postgres") || strings.Contains(appID, "patroni"):
 		addPort(5432)
 		addPort(8008)
+		if strings.Contains(appID, "patroni") {
+			addPort(2379)
+		}
 	case strings.Contains(appID, "redis"):
 		addPort(6379)
 		addPort(26379)

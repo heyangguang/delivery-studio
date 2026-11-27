@@ -1,0 +1,10 @@
+---
+- name: 生成外部负载均衡配置清单与防火墙放通矩阵
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags:
+    - checklist
+    - deploy
+  roles:
+    - role: external_lb

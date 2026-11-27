@@ -1,0 +1,12 @@
+---
+- name: 清理本地生成的外部负载均衡临时配置单目录
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags:
+    - cleanup
+  tasks:
+    - name: 移除配置单输出目录
+      ansible.builtin.file:
+        path: "{{ elb_output_dir }}"
+        state: absent

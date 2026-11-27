@@ -1,0 +1,78 @@
+{% set my_ip = hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') -%}
+scope: {{ patroni_scope }}
+namespace: /service/
+name: {{ inventory_hostname }}
+
+restapi:
+  listen: 0.0.0.0:{{ patroni_restapi_port }}
+  connect_address: {{ my_ip }}:{{ patroni_restapi_port }}
+
+etcd3:
+  hosts:
+{% if (groups['etcd'] | default([])) | length > 0 %}
+{% for h in groups['etcd'] %}
+    - {{ hostvars[h]['ansible_host'] | default(h) }}:{{ patroni_etcd_port }}
+{% endfor %}
+{% else %}
+{% for ep in (patroni_external_etcd_hosts.split(',') | map('trim') | reject('equalto', '') | list) %}
+    - {{ ep }}
+{% endfor %}
+{% endif %}
+
+bootstrap:
+  dcs:
+    ttl: {{ patroni_ttl }}
+    loop_wait: {{ patroni_loop_wait }}
+    retry_timeout: {{ patroni_retry_timeout }}
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: {{ patroni_synchronous_mode | bool | lower }}
+    synchronous_mode_strict: false
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: {{ patroni_max_connections }}
+        shared_buffers: {{ patroni_shared_buffers }}
+        wal_level: replica
+        hot_standby: "on"
+        wal_keep_size: 256MB
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_log_hints: "on"
+        password_encryption: scram-sha-256
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+  pg_hba:
+    - local all postgres trust
+    - host replication {{ patroni_replication_user }} 127.0.0.1/32 scram-sha-256
+    - host replication {{ patroni_replication_user }} {{ patroni_client_cidr }} scram-sha-256
+    - host all all 127.0.0.1/32 scram-sha-256
+    - host all all {{ patroni_client_cidr }} scram-sha-256
+
+postgresql:
+  listen: 0.0.0.0:{{ patroni_pg_port }}
+  connect_address: {{ my_ip }}:{{ patroni_pg_port }}
+  data_dir: {{ patroni_data_dir }}
+  bin_dir: {{ patroni_pg_bin_dir }}
+  pgpass: /tmp/pgpass0
+  authentication:
+    replication:
+      username: {{ patroni_replication_user }}
+      password: "{{ patroni_replication_password }}"
+    superuser:
+      username: postgres
+      password: "{{ patroni_superuser_password }}"
+    rewind:
+      username: {{ patroni_replication_user }}
+      password: "{{ patroni_replication_password }}"
+  parameters:
+    unix_socket_directories: '/var/run/postgresql'
+    max_connections: {{ patroni_max_connections }}
+    shared_buffers: {{ patroni_shared_buffers }}
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

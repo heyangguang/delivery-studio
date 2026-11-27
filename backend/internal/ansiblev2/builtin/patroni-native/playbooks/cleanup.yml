@@ -1,0 +1,26 @@
+---
+- name: 安全清理 Patroni 验收测试表（仅删测试表，不触碰业务数据）
+  hosts: patroni
+  become: true
+  gather_facts: false
+  tags:
+    - cleanup
+  tasks:
+    - name: 识别当前 Leader 节点
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_restapi_port | default(8008) }}/primary"
+        status_code: [200, 503]
+        timeout: 10
+      register: primary_probe
+      failed_when: false
+
+    - name: 在当前 Leader 删除验收测试表 studio_v2_patroni_verify
+      become_user: postgres
+      ansible.builtin.command: >
+        psql -h 127.0.0.1 -p {{ patroni_pg_port | default(5432) }} -U postgres
+        -c "DROP TABLE IF EXISTS studio_v2_patroni_verify;"
+      environment:
+        PGPASSWORD: "{{ patroni_superuser_password }}"
+      when: primary_probe.status | default(0) == 200
+      changed_when: true
+      no_log: true

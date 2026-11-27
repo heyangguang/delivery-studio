@@ -1,0 +1,63 @@
+---
+argument_specs:
+  main:
+    short_description: 生成云 ELB / 硬件负载均衡配置单、健康检查规范与防火墙放通矩阵
+    options:
+      elb_vendor:
+        type: str
+        default: 云平台 ELB
+        description: 外部负载均衡产品名称（例如 云平台 ELB / 阿里云 SLB / 华为云 ELB / F5 BIG-IP）
+      elb_mode:
+        type: str
+        default: ip
+        choices:
+          - ip
+          - domain
+        description: 入口访问方式（ip 或 domain）
+      elb_address:
+        type: str
+        default: 10.0.0.100
+        description: 外部负载均衡前端入口 VIP 或完整域名
+      elb_resolve_ip:
+        type: str
+        default: ""
+        description: 域名模式下期望解析到的入口 IP（留空则不校验 DNS 解析目标）
+      elb_protocol:
+        type: str
+        default: tcp
+        choices:
+          - tcp
+          - http
+          - https
+        description: 监听转发协议（tcp / http / https）
+      elb_frontend_port:
+        type: int
+        default: 5432
+        description: 外部负载均衡前端监听端口
+      elb_backend_port:
+        type: int
+        default: 5432
+        description: 后端业务/数据库节点实际监听端口
+      elb_health_check_type:
+        type: str
+        default: tcp
+        choices:
+          - tcp
+          - http
+        description: 健康检查协议类型（tcp 或 http，Patroni 主库入口可配 http + /primary）
+      elb_health_check_port:
+        type: int
+        default: 5432
+        description: 健康检查探测端口（例如 Patroni REST 8008 或服务自身端口）
+      elb_health_check_path:
+        type: str
+        default: /health
+        description: HTTP 健康检查路径（如 /health、/primary、/replica）
+      elb_verify_frontend:
+        type: bool
+        default: false
+        description: 验收阶段是否同时校验前端 VIP/域名连通性（在客户/云端完成 ELB 配置后勾选开启）
+      elb_output_dir:
+        type: str
+        default: /tmp/delivery-studio-external-lb
+        description: 本地配置单输出目录（包含 checklist.md 与 listeners.json）

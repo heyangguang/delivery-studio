@@ -1,0 +1,33 @@
+---
+- name: 只读探测后端池端口存活与外部入口解析状态
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags:
+    - probe
+  tasks:
+    - name: 探测每个后端目标节点的 TCP 端口存活状态
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item]['ansible_host'] | default(item) }}"
+        port: "{{ elb_backend_port | int }}"
+        timeout: 5
+      loop: "{{ groups['backends'] | default([]) }}"
+      register: backend_probes
+      failed_when: false
+
+    - name: 探测外部入口地址 TCP 连通性
+      ansible.builtin.wait_for:
+        host: "{{ elb_address }}"
+        port: "{{ elb_frontend_port | int }}"
+        timeout: 5
+      register: frontend_probe
+      failed_when: false
+
+    - name: 输出外部负载均衡入口与后端池探活摘要
+      ansible.builtin.debug:
+        msg:
+          vendor: "{{ elb_vendor }}"
+          frontend: "{{ elb_protocol }}://{{ elb_address }}:{{ elb_frontend_port }}"
+          frontend_reachable: "{{ not (frontend_probe.failed | default(false)) }}"
+          backends: "{{ groups['backends'] | default([]) | map('extract', hostvars, 'ansible_host') | list }}"
+          backend_port: "{{ elb_backend_port }}"

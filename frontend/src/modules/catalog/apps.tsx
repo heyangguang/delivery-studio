@@ -31,6 +31,7 @@ import {
 } from "@arco-design/web-react/icon";
 import {
   ago,
+  api,
   phaseOf,
   clock,
   dayLabel,
@@ -57,8 +58,35 @@ import {
   tintOf,
 } from "../../design/ui";
 import { bi, canonicalCat, catLabel, getLang, useLang } from "../../app/i18n";
+import { EngineSwitcher } from "./ansiblev2";
 
 import type { LoadState } from "../projects/deliveries";
+
+type V2CatalogApp = {
+  name: string;
+  title: string;
+  title_en?: string;
+  category: string;
+  version: string;
+  summary: string;
+  summary_en?: string;
+  icon?: string;
+  color?: string;
+  asset_kind: string;
+  source: "builtin" | "custom" | "override";
+  group_count: number;
+  var_count: number;
+  step_count: number;
+  valid: boolean;
+  tags?: string[];
+  schemes?: {
+    id: string;
+    title: string;
+    title_en?: string;
+    summary?: string;
+    group_counts?: Record<string, number>;
+  }[];
+};
 
 const isAllCat = (c?: string) => !c || c === "全部" || c === "All";
 const catKey = (c?: string) => canonicalCat(c) || "其他";
@@ -744,10 +772,26 @@ export function AppsPage({
   jobs: Job[];
 }) {
   const lang = useLang();
+  const [engine, setEngine] = useStored<"v2" | "v1">("mh-apps-engine", "v2");
+  const [v2Apps, setV2Apps] = useState<V2CatalogApp[]>([]);
+  const [v2Load, setV2Load] = useState<LoadState>("loading");
   const [f, setF] = useStored<Filters>("mh-apps-filters", DEFAULTS);
   const set = (p: Partial<Filters>) => setF((c) => ({ ...c, ...p }));
   const usage = useMemo(() => usageOf(jobs), [jobs]);
   const search = useRef<HTMLInputElement | null>(null);
+
+  const loadV2 = () => {
+    setV2Load("loading");
+    api<V2CatalogApp[]>("/api/v2/ansible/components")
+      .then((items) => {
+        setV2Apps(Array.isArray(items) ? items : []);
+        setV2Load("ready");
+      })
+      .catch(() => setV2Load("error"));
+  };
+  useEffect(() => {
+    loadV2();
+  }, []);
 
   useEffect(() => {
     if (selected) return;
@@ -848,6 +892,76 @@ export function AppsPage({
     return m;
   }, [jobs]);
 
+  const v2Match = (c: V2CatalogApp, skip?: "cat" | "tags") => {
+    const q = f.q.trim().toLowerCase();
+    const title = bi(c.title, c.title_en || c.title);
+    const summary = bi(c.summary, c.summary_en || c.summary);
+    if (
+      q &&
+      !`${c.name} ${title} ${c.version} ${c.category} ${catLabel(c.category)} ${summary} ${(c.tags || []).join(" ")} ${(c.schemes || []).map((s) => s.title).join(" ")}`
+        .toLowerCase()
+        .includes(q)
+    )
+      return false;
+    if (skip !== "cat" && !isAllCat(f.cat) && catKey(c.category) !== catKey(f.cat))
+      return false;
+    if (skip !== "tags" && f.tags.some((t) => !(c.tags || []).includes(t)))
+      return false;
+    if (f.mine && !usage.has(c.name)) return false;
+    return true;
+  };
+  const v2Cats = useMemo(() => {
+    const m = new Map<string, number>();
+    v2Apps
+      .filter((c) => v2Match(c, "cat"))
+      .forEach((c) =>
+        m.set(catKey(c.category), (m.get(catKey(c.category)) || 0) + 1),
+      );
+    const all = new Map<string, number>();
+    v2Apps.forEach((c) =>
+      all.set(catKey(c.category), (all.get(catKey(c.category)) || 0) + 1),
+    );
+    return [...all.keys()]
+      .sort(
+        (a, b) =>
+          all.get(b)! - all.get(a)! ||
+          displayCat(a).localeCompare(displayCat(b), getLang()),
+      )
+      .map((c) => [c, m.get(c) || 0] as [string, number]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v2Apps, f.q, f.tags, f.mine, usage, lang]);
+  const v2Tags = useMemo(() => {
+    const m = new Map<string, number>();
+    v2Apps
+      .filter((c) => v2Match(c, "tags"))
+      .forEach((c) =>
+        (c.tags || []).forEach((t) => m.set(t, (m.get(t) || 0) + 1)),
+      );
+    return [...m.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], getLang()))
+      .slice(0, 16);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v2Apps, f.q, f.cat, f.mine, f.tags, usage, lang]);
+  const v2List = useMemo(() => {
+    return v2Apps
+      .filter((c) => v2Match(c))
+      .sort((a, b) => {
+        if (f.sort === "name") return a.name.localeCompare(b.name, getLang());
+        if (f.sort === "recent")
+          return (
+            (usage.get(b.name)?.last || "").localeCompare(
+              usage.get(a.name)?.last || "",
+            ) || a.name.localeCompare(b.name, getLang())
+          );
+        return (
+          Number(b.source === "builtin") - Number(a.source === "builtin") ||
+          (usage.get(b.name)?.count || 0) - (usage.get(a.name)?.count || 0) ||
+          a.name.localeCompare(b.name, getLang())
+        );
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v2Apps, f, usage, lang]);
+
   const app = apps.find((a) => a.id === selected);
   if (selected) {
     if (app)
@@ -856,6 +970,7 @@ export function AppsPage({
           key={app.id}
           app={app}
           jobs={jobs.filter((j) => j.app_id === app.id)}
+          v2Match={v2Apps.find((c) => c.name === `${app.id}-native`)?.name}
         />
       );
     if (load === "loading")
@@ -1025,6 +1140,283 @@ export function AppsPage({
     </aside>
   );
 
+  if (engine === "v2") {
+    const v2Plain = !f.q && isAllCat(f.cat) && !f.tags.length && !f.mine;
+    return (
+      <div className="store2">
+        <aside className="store-rail" aria-label={bi("筛选 2.0 应用", "Filter 2.0 apps")}>
+          <div className="list-head">
+            <div className="list-title">
+              <h1>{bi("应用", "Apps")}</h1>
+            </div>
+            <Input
+              ref={(r) => {
+                search.current =
+                  (r as unknown as { dom?: HTMLInputElement })?.dom ?? null;
+              }}
+              prefix={<IconSearch />}
+              suffix={!f.q ? <Kbd>/</Kbd> : undefined}
+              allowClear
+              placeholder={bi("搜索 2.0 组件、方案、标签", "Search 2.0 components, schemes, tags")}
+              value={f.q}
+              onChange={(v) => set({ q: v })}
+              onKeyDown={(e) => {
+                if (e.key === "Escape")
+                  (set({ q: "" }), (e.target as HTMLInputElement).blur());
+              }}
+              aria-label={bi("搜索应用", "Search apps")}
+            />
+          </div>
+          <div className="store-rail-body">
+            <nav className="rail-group rail-cats" aria-label={bi("分类", "Categories")}>
+              <h3>{bi("分类", "Categories")}</h3>
+              <button
+                type="button"
+                className={isAllCat(f.cat) ? "on" : ""}
+                onClick={() => set({ cat: "全部" })}
+              >
+                <span>{bi("全部", "All")}</span>
+                <em className="num">
+                  {v2Apps.filter((c) => v2Match(c, "cat")).length}
+                </em>
+              </button>
+              {v2Cats.map(([c, n]) => (
+                <button
+                  type="button"
+                  key={c}
+                  className={!isAllCat(f.cat) && catKey(f.cat) === c ? "on" : ""}
+                  onClick={() => set({ cat: c })}
+                  disabled={!n && catKey(f.cat) !== c}
+                >
+                  <span className="rail-cat">
+                    <i
+                      style={{
+                        background: `linear-gradient(${tintOf(c).join(",")})`,
+                      }}
+                      aria-hidden
+                    />
+                    {displayCat(c, bi("其他", "Other"))}
+                  </span>
+                  <em className="num">{n}</em>
+                </button>
+              ))}
+            </nav>
+            {v2Tags.length > 0 && (
+              <div className="rail-group rail-tags" role="group" aria-label={bi("标签", "Tags")}>
+                <h3>{bi("标签", "Tags")}</h3>
+                <div className="rail-tags">
+                  {v2Tags.map(([t, n]) => {
+                    const on = f.tags.includes(t);
+                    return (
+                      <Tag
+                        key={t}
+                        checkable
+                        checked={on}
+                        className={!n && !on ? "dim" : ""}
+                        onCheck={() =>
+                          (n || on) &&
+                          set({
+                            tags: on ? f.tags.filter((x) => x !== t) : [...f.tags, t],
+                          })
+                        }
+                      >
+                        {t}
+                        <em className="num">{n}</em>
+                      </Tag>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="rail-group rail-scope" role="group" aria-label={bi("范围", "Scope")}>
+              <h3>{bi("范围", "Scope")}</h3>
+              <Checkbox
+                className="rail-check"
+                checked={f.mine}
+                onChange={(c) => set({ mine: c })}
+              >
+                {bi("我用过的", "Used by me")}
+              </Checkbox>
+            </div>
+          </div>
+        </aside>
+        <div className="store-main">
+          <header className="store-bar">
+            <div>
+              <h2>
+                {isAllCat(f.cat)
+                  ? bi("原生 Ansible 2.0 应用目录", "Native Ansible 2.0 App Catalog")
+                  : displayCat(f.cat, bi("其他", "Other"))}
+              </h2>
+              <p className="muted small num" aria-live="polite">
+                {v2Load === "ready"
+                  ? v2Plain
+                    ? bi(
+                        `共 ${v2Apps.length} 个原生 Ansible 2.0 组件，全部支持离线打包、自动执行与 --check --diff 预演`,
+                        `${v2Apps.length} native Ansible 2.0 components — offline bundles, automated execution & --check --diff ready`,
+                      )
+                    : bi(
+                        `${v2List.length} / ${v2Apps.length} 个组件`,
+                        `${v2List.length} of ${v2Apps.length} components`,
+                      )
+                  : bi("正在加载…", "Loading…")}
+              </p>
+            </div>
+            <div className="store-bar-tools">
+              <EngineSwitcher
+                engine="v2"
+                onChange={(next) => {
+                  setEngine(next);
+                  set({ cat: "全部", tags: [] });
+                }}
+              />
+              <Segmented
+                label={bi("排序", "Sort")}
+                value={f.sort}
+                onChange={(v) => set({ sort: v })}
+                options={getSorts(lang)}
+              />
+            </div>
+          </header>
+
+          {v2Load === "loading" && !v2Apps.length ? (
+            <div className="feature skeleton">
+              <Skeleton animation text={{ rows: 4, width: ["35%", "70%", "55%", "40%"] }} />
+            </div>
+          ) : v2Load === "error" && !v2Apps.length ? (
+            <div className="list-state">
+              <IconExclamationCircle className="bad" />
+              <p>{bi("2.0 组件目录加载失败", "Failed to load 2.0 component catalog")}</p>
+              <Button size="small" icon={<IconRefresh />} onClick={loadV2}>
+                {bi("重试", "Retry")}
+              </Button>
+            </div>
+          ) : !v2List.length ? (
+            <div className="list-state big">
+              <IconSearch />
+              <p>{bi("没有符合条件的 2.0 组件", "No matching 2.0 components")}</p>
+              <Button onClick={clear}>{bi("清除全部筛选", "Clear all filters")}</Button>
+            </div>
+          ) : (
+            <section className="store-sec">
+              <div className="tiles2">
+                {v2List.map((c) => {
+                  const title = bi(c.title, c.title_en || c.title);
+                  const summary = bi(c.summary, c.summary_en || c.summary);
+                  const used = usage.get(c.name);
+                  return (
+                    <article key={c.name} className="tile2">
+                      <div className="tile2-head">
+                        <AppGlyph id={c.icon || c.name} category={c.category} size={48} />
+                        <div className="tile2-title">
+                          <a
+                            className="tile2-link"
+                            href={`#/components?v2=${encodeURIComponent(c.name)}&tab=overview`}
+                          >
+                            {title}
+                          </a>
+                          <span>
+                            <i
+                              className="cat-dot"
+                              style={{
+                                background: `linear-gradient(${tintOf(c.category).join(",")})`,
+                              }}
+                              aria-hidden
+                            />
+                            {displayCat(c.category)} · v{c.version} ·{" "}
+                            {c.source === "builtin"
+                              ? bi("内置 2.0", "Built-in 2.0")
+                              : bi("已导入 2.0", "Imported 2.0")}
+                          </span>
+                        </div>
+                      </div>
+                      <p>{summary}</p>
+                      <dl className="tile2-facts">
+                        <div>
+                          <dt>{bi("快捷方案", "Schemes")}</dt>
+                          <dd>
+                            {c.schemes && c.schemes.length > 0 ? (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                                {c.schemes.map((sc) => (
+                                  <Button
+                                    key={sc.id}
+                                    size="mini"
+                                    type="secondary"
+                                    style={{ whiteSpace: "nowrap" }}
+                                    onClick={() =>
+                                      go({
+                                        name: "components",
+                                        v2: c.name,
+                                        tab: "deliver",
+                                        scheme: sc.id,
+                                      })
+                                    }
+                                  >
+                                    {bi(sc.title, sc.title_en || sc.title)}
+                                  </Button>
+                                ))}
+                              </div>
+                            ) : (
+                              bi("标准 Role 自由配置", "Standard Ansible Role")
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>{bi("资产结构", "Structure")}</dt>
+                          <dd className="num">
+                            {bi(
+                              `${c.group_count} 主机组 · ${c.var_count} 变量 · ${c.step_count} 步骤`,
+                              `${c.group_count} groups · ${c.var_count} vars · ${c.step_count} steps`,
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="tile2-foot">
+                        <span className="tile2-meta num">
+                          {used ? (
+                            <span>
+                              {bi(`我的交付 ${used.count}`, `My deliveries ${used.count}`)}
+                            </span>
+                          ) : (
+                            <span>{bi("标准 Ansible 2.0", "Pure Ansible 2.0")}</span>
+                          )}
+                        </span>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Button
+                            size="mini"
+                            style={{ whiteSpace: "nowrap" }}
+                            onClick={() =>
+                              go({ name: "components", v2: c.name, tab: "overview" })
+                            }
+                          >
+                            {bi("查看 Role", "Inspect")}
+                          </Button>
+                          {can("delivery.create") && (
+                            <Button
+                              size="mini"
+                              type="primary"
+                              style={{ whiteSpace: "nowrap" }}
+                              icon={<IconPlus />}
+                              onClick={() =>
+                                go({ name: "components", v2: c.name, tab: "deliver" })
+                              }
+                            >
+                              {bi("立即交付", "Deliver")}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="store2">
       {rail}
@@ -1051,6 +1443,13 @@ export function AppsPage({
             </p>
           </div>
           <div className="store-bar-tools">
+            <EngineSwitcher
+              engine="v1"
+              onChange={(next) => {
+                setEngine(next);
+                set({ cat: "全部", tags: [] });
+              }}
+            />
             <Segmented
               label={bi("排序", "Sort")}
               value={f.sort}
@@ -1312,7 +1711,15 @@ const contentIcon = (name: string) =>
     <IconFile />
   );
 
-function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
+function Product({
+  app,
+  jobs,
+  v2Match,
+}: {
+  app: AppInfo;
+  jobs: Job[];
+  v2Match?: string;
+}) {
   useLang();
   const d = app.detail;
   const plans = plansOf(app);
@@ -1411,15 +1818,26 @@ function Product({ app, jobs }: { app: AppInfo; jobs: Job[] }) {
               </div>
             )}
             <div className="row-gap">
+              {v2Match && can("delivery.create") && (
+                <Button
+                  size="large"
+                  type="primary"
+                  className="feature-cta"
+                  icon={<IconPlus />}
+                  onClick={() => go({ name: "components", v2: v2Match, tab: "deliver" })}
+                >
+                  {bi("使用 2.0 原生引擎交付", "Deliver with 2.0 Engine")}
+                </Button>
+              )}
               {can("delivery.create") && (
                 <Button
                   size="large"
-                  className="feature-cta"
+                  className={v2Match ? undefined : "feature-cta"}
                   icon={<IconPlus />}
                   disabled={!app.available}
                   onClick={() => go({ name: "new", app: app.id })}
                 >
-                  {bi("新建集群", "New Cluster")}
+                  {v2Match ? bi("新建集群（1.0 经典）", "New Cluster (1.0 Legacy)") : bi("新建集群", "New Cluster")}
                 </Button>
               )}
               {!app.available && (

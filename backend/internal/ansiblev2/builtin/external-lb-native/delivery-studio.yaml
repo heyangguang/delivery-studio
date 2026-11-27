@@ -1,0 +1,64 @@
+schema: studio/v2
+name: external-lb-native
+title: 外部负载均衡（云 ELB / 硬件 · 原生 Ansible 2.0）
+title_en: External Load Balancer (Cloud ELB / Hardware · Native Ansible 2.0)
+category: 负载均衡
+version: "2.0"
+summary: 面向云平台 ELB / SLB / F5 硬件负载均衡的纯标准 Ansible 配置单生成与入口连通性验收组件；平台不修改外部设备，自动输出监听、后端池、健康检查与防火墙放通矩阵，并支持端到端探活验收。
+summary_en: Pure standard Ansible checklist generator and endpoint verifier for Cloud ELB / SLB / F5 hardware load balancers; generates auditable listener/ACL matrices and verifies backend & VIP reachability without mutating external appliances.
+icon: elb
+color: amber
+asset_kind: playbook_project
+delivery_modes:
+  - offline
+  - automatic
+entrypoints:
+  deploy: playbooks/deploy.yml
+  verify: playbooks/verify.yml
+  probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
+groups:
+  - name: backends
+    title: 后端目标节点（被外部 LB 代理的业务/数据库节点）
+    title_en: Backend Target Nodes
+    min: 1
+    max: 16
+    default_count: 2
+schemes:
+  - id: tcp-l4
+    title: 四层 TCP 入口（数据库 / Redis / Patroni）
+    title_en: L4 TCP Frontend (Database / Cache)
+    summary: 生成四层 TCP 监听与 HTTP/TCP 健康检查配置单，适用于 PostgreSQL / Patroni / Redis 入口
+    group_counts:
+      backends: 2
+    vars:
+      elb_protocol: "tcp"
+      elb_frontend_port: 5432
+      elb_backend_port: 5432
+      elb_health_check_type: "tcp"
+      elb_health_check_port: 5432
+  - id: http-l7
+    title: 七层 HTTP/HTTPS 入口（Web / API 网关）
+    title_en: L7 HTTP/HTTPS Frontend (Web / API)
+    summary: 生成七层 HTTP 监听与路径健康检查配置单，适用于 Nginx / HAProxy / 业务应用入口
+    group_counts:
+      backends: 2
+    vars:
+      elb_protocol: "http"
+      elb_frontend_port: 80
+      elb_backend_port: 80
+      elb_health_check_type: "http"
+      elb_health_check_port: 80
+      elb_health_check_path: "/health"
+ports:
+  - name: frontend
+    var: elb_frontend_port
+    protocol: tcp
+  - name: backend
+    var: elb_backend_port
+    protocol: tcp
+tags:
+  - 负载均衡
+  - 外部入口
+  - 配置单
+  - 原生 Ansible

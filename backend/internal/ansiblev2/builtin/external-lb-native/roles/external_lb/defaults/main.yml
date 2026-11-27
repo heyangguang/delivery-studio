@@ -1,0 +1,13 @@
+---
+elb_vendor: "云平台 ELB"
+elb_mode: "ip"
+elb_address: "10.0.0.100"
+elb_resolve_ip: ""
+elb_protocol: "tcp"
+elb_frontend_port: 5432
+elb_backend_port: 5432
+elb_health_check_type: "tcp"
+elb_health_check_port: 5432
+elb_health_check_path: "/health"
+elb_verify_frontend: false
+elb_output_dir: "/tmp/delivery-studio-external-lb"

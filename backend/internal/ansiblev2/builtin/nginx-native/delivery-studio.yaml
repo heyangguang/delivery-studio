@@ -16,6 +16,7 @@ entrypoints:
   deploy: playbooks/deploy.yml
   verify: playbooks/verify.yml
   probe: playbooks/probe.yml
+  cleanup: playbooks/cleanup.yml
 groups:
   - name: nginx
     title: Nginx 负载均衡节点

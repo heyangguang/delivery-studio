@@ -1,0 +1,78 @@
+---
+- name: 校验 etcd DCS 协调集群健康与多数派状态
+  hosts: etcd
+  become: true
+  gather_facts: false
+  tags:
+    - verify
+    - dcs
+  tasks:
+    - name: 校验 etcd 客户端端口可达
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}"
+        port: "{{ patroni_etcd_port | default(2379) }}"
+        timeout: 15
+
+    - name: 校验本节点 etcd endpoint 健康
+      ansible.builtin.command: >
+        etcdctl --endpoints=http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_etcd_port | default(2379) }}
+        endpoint health
+      environment:
+        ETCDCTL_API: "3"
+      register: etcd_health
+      changed_when: false
+      failed_when: etcd_health.rc != 0
+
+- name: 校验 Patroni 选主、WAL 流复制与主库读写连通性
+  hosts: patroni
+  become: true
+  gather_facts: false
+  tags:
+    - verify
+    - patroni
+  tasks:
+    - name: 校验 Patroni REST API 存活探针 (/liveness)
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_restapi_port | default(8008) }}/liveness"
+        status_code: 200
+        timeout: 10
+      register: rest_liveness
+
+    - name: 获取当前节点 Patroni 角色信息 (/patroni)
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_restapi_port | default(8008) }}/patroni"
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: node_patroni_info
+
+    - name: 在首个节点查询 patronictl 完整集群成员拓扑
+      ansible.builtin.command: patronictl -c /etc/patroni/patroni.yml list -f json
+      register: cluster_members_raw
+      run_once: true
+      changed_when: false
+
+    - name: 校验集群存在唯一 Leader 且全部节点运行正常
+      ansible.builtin.assert:
+        that:
+          - "(members | selectattr('Role', 'in', ['Leader', 'primary', 'master']) | list | length) == 1"
+          - "(members | selectattr('State', 'in', ['running', 'streaming']) | list | length) == (groups['patroni'] | length)"
+        fail_msg: "Patroni 集群拓扑异常: {{ cluster_members_raw.stdout }}"
+        success_msg: "Patroni 集群健康：1 主 {{ (groups['patroni'] | length) - 1 }} 从全部就绪"
+      vars:
+        members: "{{ cluster_members_raw.stdout | from_json }}"
+      run_once: true
+
+    - name: 在当前 Leader 主库执行端到端 SQL 写入与读取验收
+      become_user: postgres
+      ansible.builtin.shell: |
+        psql -h 127.0.0.1 -p {{ patroni_pg_port | default(5432) }} -U postgres -v ON_ERROR_STOP=1 <<'EOSQL'
+        CREATE TABLE IF NOT EXISTS studio_v2_patroni_verify (id serial PRIMARY KEY, checked_at timestamptz DEFAULT now());
+        INSERT INTO studio_v2_patroni_verify DEFAULT VALUES;
+        SELECT count(*) FROM studio_v2_patroni_verify;
+        EOSQL
+      environment:
+        PGPASSWORD: "{{ patroni_superuser_password }}"
+      when: "(node_patroni_info.json.role | default('')) in ['master', 'primary', 'leader']"
+      changed_when: false
+      no_log: true

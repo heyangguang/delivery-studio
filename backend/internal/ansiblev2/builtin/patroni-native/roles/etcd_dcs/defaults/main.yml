@@ -1,0 +1,5 @@
+---
+patroni_etcd_port: 2379
+patroni_etcd_peer_port: 2380
+patroni_etcd_data_dir: "/var/lib/etcd/patroni-dcs"
+patroni_etcd_cluster_token: "studio-patroni-etcd-dcs"

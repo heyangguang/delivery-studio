@@ -1,0 +1,33 @@
+---
+- name: 只读实测采集线上 Patroni 集群角色、Timeline 与 PostgreSQL 参数
+  hosts: patroni
+  become: true
+  gather_facts: false
+  tags:
+    - probe
+  tasks:
+    - name: 采集 Patroni REST API 实时角色与状态
+      ansible.builtin.uri:
+        url: "http://{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}:{{ patroni_restapi_port | default(8008) }}/patroni"
+        return_content: true
+        status_code: [200, 503]
+        timeout: 10
+      register: patroni_api
+      failed_when: false
+
+    - name: 采集 patronictl 集群实时成员列表
+      ansible.builtin.command: patronictl -c /etc/patroni/patroni.yml list
+      register: patroni_list
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: 输出节点实测结果
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          role: "{{ patroni_api.json.role | default('unknown') }}"
+          state: "{{ patroni_api.json.state | default('unknown') }}"
+          timeline: "{{ patroni_api.json.timeline | default(0) }}"
+          pg_version: "{{ patroni_api.json.server_version | default('unknown') }}"
+          cluster_table: "{{ patroni_list.stdout_lines | default([]) }}"

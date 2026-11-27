@@ -1,0 +1,33 @@
+# 外部负载均衡配置单（Delivery Studio 2.0）
+
+> 本平台不调用云 API 或修改硬件设备；请由云平台 / 网络团队按以下清单配置外部负载均衡，完成后可开启 `elb_verify_frontend=true` 执行入口验收。
+
+## 1. 入口监听配置
+- **负载均衡产品**：{{ elb_vendor }}
+- **入口方式**：{{ elb_mode }}
+- **前端入口地址**：`{{ elb_address }}`{% if elb_resolve_ip %}（期望解析 IP：`{{ elb_resolve_ip }}`）{% endif %}
+- **协议 / 端口**：`{{ elb_protocol | upper }}` / `{{ elb_frontend_port }}`
+
+## 2. 后端服务器池（Backend Pool）
+| 节点名称 | 目标 IP | 后端端口 | 权重 |
+| --- | --- | --- | --- |
+{% for h in groups['backends'] | default([]) -%}
+| {{ h }} | {{ hostvars[h]['ansible_host'] | default(h) }} | {{ elb_backend_port }} | 100 |
+{% endfor %}
+
+## 3. 健康检查策略
+- **探活协议**：`{{ elb_health_check_type | upper }}`
+- **探活端口**：`{{ elb_health_check_port }}`
+{% if elb_health_check_type == 'http' -%}
+- **探活路径**：`{{ elb_health_check_path }}`（期望 HTTP `200`）
+{% endif -%}
+- **推荐阈值**：间隔 `3s` · 超时 `2s` · 连续健康 `2` 次上线 · 连续失败 `3` 次摘除
+
+## 4. 防火墙 / 安全组放通矩阵
+| 方向 | 源 | 目标 | 协议/端口 | 用途 |
+| --- | --- | --- | --- | --- |
+| 入站 | 业务客户端网段 | `{{ elb_address }}` | {{ elb_protocol | upper }}/{{ elb_frontend_port }} | 业务流量入口 |
+| 转发 | 外部 LB 回源网段 | 全部后端节点（{{ groups['backends'] | default([]) | length }} 台） | TCP/{{ elb_backend_port }} | 负载均衡转发流量 |
+{% if (elb_health_check_port | int) != (elb_backend_port | int) -%}
+| 探活 | 外部 LB 健康检查网段 | 全部后端节点（{{ groups['backends'] | default([]) | length }} 台） | TCP/{{ elb_health_check_port }} | 健康检查探测 |
+{% endif -%}

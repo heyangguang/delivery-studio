@@ -1,0 +1,18 @@
+---
+- name: 部署 etcd 分布式协调集群 (DCS)
+  hosts: etcd
+  become: true
+  tags:
+    - dcs
+    - deploy
+  roles:
+    - role: etcd_dcs
+
+- name: 部署 Patroni + PostgreSQL 高可用数据库集群
+  hosts: patroni
+  become: true
+  tags:
+    - patroni
+    - deploy
+  roles:
+    - role: patroni

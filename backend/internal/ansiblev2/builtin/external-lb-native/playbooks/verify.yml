@@ -1,0 +1,41 @@
+---
+- name: 验收后端节点端口可达性与外部负载均衡入口连通性
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags:
+    - verify
+  tasks:
+    - name: 校验所有后端节点业务端口 TCP 可达
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item]['ansible_host'] | default(item) }}"
+        port: "{{ elb_backend_port | int }}"
+        timeout: 10
+      loop: "{{ groups['backends'] | default([]) }}"
+
+    - name: 校验外部负载均衡入口解析（域名模式且已填写期望解析 IP）
+      ansible.builtin.shell: >
+        getent ahostsv4 "{{ elb_address }}" | awk '{print $1}' | sort -u
+      register: dns_check
+      changed_when: false
+      when:
+        - (elb_verify_frontend | bool)
+        - elb_mode == 'domain'
+        - (elb_resolve_ip | default('') | trim | length) > 0
+      failed_when: elb_resolve_ip not in dns_check.stdout_lines
+
+    - name: 校验外部负载均衡前端入口端口 TCP 可达
+      ansible.builtin.wait_for:
+        host: "{{ elb_resolve_ip if (elb_mode == 'domain' and (elb_resolve_ip | default('') | trim | length) > 0) else elb_address }}"
+        port: "{{ elb_frontend_port | int }}"
+        timeout: 10
+      when: elb_verify_frontend | bool
+
+    - name: 校验外部负载均衡七层 HTTP 路径响应（HTTP 模式）
+      ansible.builtin.uri:
+        url: "http://{{ elb_address }}:{{ elb_frontend_port }}{{ elb_health_check_path | default('/') }}"
+        status_code: [200, 204, 301, 302]
+        timeout: 10
+      when:
+        - elb_verify_frontend | bool
+        - elb_protocol == 'http'

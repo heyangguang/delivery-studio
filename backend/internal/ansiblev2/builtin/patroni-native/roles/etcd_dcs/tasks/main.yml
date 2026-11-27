@@ -1,0 +1,124 @@
+---
+- name: 检测本机是否已安装 etcd 二进制
+  ansible.builtin.command: which etcd
+  register: etcd_bin_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - install
+
+- name: 更新软件源索引（Debian/Ubuntu 按需刷新）
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - etcd_bin_check.rc != 0
+  failed_when: false
+  tags:
+    - install
+
+- name: 安装 etcd 软件包（Debian/Ubuntu）
+  ansible.builtin.package:
+    name:
+      - etcd-server
+      - etcd-client
+    state: present
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - etcd_bin_check.rc != 0
+  tags:
+    - install
+
+- name: 安装 etcd 软件包（RHEL/Rocky/Kylin）
+  ansible.builtin.package:
+    name:
+      - etcd
+    state: present
+  when:
+    - ansible_facts['os_family'] != 'Debian'
+    - etcd_bin_check.rc != 0
+  tags:
+    - install
+
+- name: 检查 etcd DCS 是否已在运行并由本集群接管
+  ansible.builtin.stat:
+    path: /etc/etcd/etcd-patroni.conf.yml
+  register: etcd_dcs_configured
+  tags:
+    - configure
+
+- name: 首次初始化前停止系统默认单机 etcd 实例
+  ansible.builtin.service:
+    name: etcd
+    state: stopped
+  when: not etcd_dcs_configured.stat.exists
+  failed_when: false
+  tags:
+    - configure
+
+- name: 确保 etcd 配置与数据目录存在
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: "0700"
+  loop:
+    - /etc/etcd
+    - "{{ patroni_etcd_data_dir }}"
+  tags:
+    - configure
+
+- name: 写入标准 etcd DCS 配置文件
+  ansible.builtin.template:
+    src: etcd.conf.yml.j2
+    dest: /etc/etcd/etcd-patroni.conf.yml
+    owner: etcd
+    group: etcd
+    mode: "0640"
+  register: etcd_cfg_rendered
+  tags:
+    - configure
+
+- name: 创建 etcd systemd override 目录
+  ansible.builtin.file:
+    path: /etc/systemd/system/etcd.service.d
+    state: directory
+    mode: "0755"
+  tags:
+    - configure
+
+- name: 写入 etcd systemd override 指向标准 YAML 配置
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/etcd.service.d/override.conf
+    mode: "0644"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/etcd --config-file /etc/etcd/etcd-patroni.conf.yml
+  register: etcd_unit_rendered
+  tags:
+    - configure
+
+- name: 重载 systemd 并启用 etcd 开机自启
+  ansible.builtin.systemd:
+    name: etcd
+    daemon_reload: true
+    enabled: true
+  tags:
+    - start
+
+- name: 并发启动或重启 etcd 集群节点完成 Raft 选主
+  ansible.builtin.command: "systemctl {{ 'restart' if (etcd_cfg_rendered.changed or etcd_unit_rendered.changed) else 'start' }} --no-block etcd"
+  changed_when: true
+  tags:
+    - start
+
+- name: 等待 etcd 客户端端口监听就绪
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') }}"
+    port: "{{ patroni_etcd_port }}"
+    timeout: 45
+  tags:
+    - start

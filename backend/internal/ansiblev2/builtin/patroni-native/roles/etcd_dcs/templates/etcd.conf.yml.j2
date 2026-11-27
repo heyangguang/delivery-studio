@@ -1,0 +1,12 @@
+{% set my_ip = hostvars[inventory_hostname]['ansible_host'] | default('127.0.0.1') -%}
+name: '{{ inventory_hostname }}'
+data-dir: '{{ patroni_etcd_data_dir }}'
+listen-peer-urls: 'http://{{ my_ip }}:{{ patroni_etcd_peer_port }}'
+listen-client-urls: 'http://{{ my_ip }}:{{ patroni_etcd_port }},http://127.0.0.1:{{ patroni_etcd_port }}'
+initial-advertise-peer-urls: 'http://{{ my_ip }}:{{ patroni_etcd_peer_port }}'
+advertise-client-urls: 'http://{{ my_ip }}:{{ patroni_etcd_port }}'
+initial-cluster: '{% for h in groups["etcd"] %}{{ h }}=http://{{ hostvars[h]["ansible_host"] | default(h) }}:{{ patroni_etcd_peer_port }}{% if not loop.last %},{% endif %}{% endfor %}'
+initial-cluster-token: '{{ patroni_etcd_cluster_token }}'
+initial-cluster-state: 'new'
+enable-v2: false
+enable-grpc-gateway: true

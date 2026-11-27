@@ -1,0 +1,71 @@
+---
+argument_specs:
+  main:
+    short_description: 部署并管理 Patroni + PostgreSQL 自动高可用数据库集群
+    options:
+      patroni_scope:
+        type: str
+        default: studio-pg-ha
+        description: Patroni 集群 Scope 标识（写入 etcd 命名空间，同一套 etcd 下须唯一）
+      patroni_pg_port:
+        type: int
+        default: 5432
+        description: PostgreSQL 数据库服务监听端口
+      patroni_restapi_port:
+        type: int
+        default: 8008
+        description: Patroni REST API 健康探针与管理端口
+      patroni_etcd_port:
+        type: int
+        default: 2379
+        description: etcd DCS 客户端端口
+      patroni_external_etcd_hosts:
+        type: str
+        default: ""
+        description: 外部 etcd 地址列表（逗号分隔 ip:port；当 etcd 主机组为空时必填）
+      patroni_data_dir:
+        type: str
+        default: /var/lib/postgresql/patroni
+        description: Patroni 托管的 PostgreSQL 数据目录路径
+      patroni_client_cidr:
+        type: str
+        default: 0.0.0.0/0
+        description: pg_hba.conf 允许接入的客户端与节点网段（CIDR）
+      patroni_superuser_password:
+        type: str
+        default: PatroniAdmin2026!
+        no_log: true
+        description: PostgreSQL 超级用户 postgres 密码
+      patroni_replication_user:
+        type: str
+        default: replicator
+        description: WAL 流复制与 pg_rewind 专用账号
+      patroni_replication_password:
+        type: str
+        default: PatroniRepl2026!
+        no_log: true
+        description: WAL 流复制账号密码
+      patroni_shared_buffers:
+        type: str
+        default: 512MB
+        description: PostgreSQL 共享内存缓冲区大小（shared_buffers）
+      patroni_max_connections:
+        type: int
+        default: 300
+        description: PostgreSQL 最大并发连接数（max_connections）
+      patroni_synchronous_mode:
+        type: bool
+        default: false
+        description: 启用强一致同步提交（synchronous_mode，确保至少 1 个从库确认写入）
+      patroni_ttl:
+        type: int
+        default: 30
+        description: 主库租约 TTL（秒）
+      patroni_loop_wait:
+        type: int
+        default: 10
+        description: Patroni 心跳巡检间隔（秒）
+      patroni_retry_timeout:
+        type: int
+        default: 10
+        description: DCS 连接重试超时（秒）
